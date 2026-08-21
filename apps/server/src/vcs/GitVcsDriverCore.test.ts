@@ -185,6 +185,34 @@ it.effect("invalidates origin remote cache when a driver mutation adds origin", 
   }).pipe(Effect.provide(TestLayer)),
 );
 
+it.effect("reports headOid equal to the real HEAD sha", () =>
+  Effect.gen(function* () {
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    const cwd = yield* makeTmpDir();
+    yield* initRepoWithCommit(cwd);
+
+    const details = yield* driver.statusDetailsLocal(cwd);
+    const expectedHeadOid = yield* git(cwd, ["rev-parse", "HEAD"]);
+
+    assert.equal(details.headOid, expectedHeadOid);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("omits headOid when HEAD cannot be resolved", () =>
+  Effect.gen(function* () {
+    const driver = yield* GitVcsDriver.GitVcsDriver;
+    const cwd = yield* makeTmpDir();
+    // Unborn HEAD: repository exists but no commit has ever been made.
+    yield* driver.initRepo({ cwd });
+
+    const details = yield* driver.statusDetailsLocal(cwd);
+
+    assert.isTrue(details.isRepo);
+    assert.isUndefined(details.headOid);
+    assert.isFalse("headOid" in details);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect("re-reads origin remote status after cache TTL expiry and bypassed invalidation", () =>
   Effect.gen(function* () {
     const driver = yield* GitVcsDriver.GitVcsDriver;

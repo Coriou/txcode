@@ -213,6 +213,11 @@ const VcsStatusLocalShape = {
   hasPrimaryRemote: Schema.Boolean,
   isDefaultRef: Schema.Boolean,
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  /**
+   * HEAD commit oid of the checked-out branch. Absent on servers predating
+   * this field; clients treat absence as unknown, never as mismatch evidence.
+   */
+  headOid: Schema.optional(Schema.String),
   hasWorkingTreeChanges: Schema.Boolean,
   workingTree: Schema.Struct({
     files: Schema.Array(

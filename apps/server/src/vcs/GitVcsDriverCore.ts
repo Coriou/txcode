@@ -1606,7 +1606,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.catchTags({ GitCommandError: () => Effect.succeed(null) }),
     );
     const statusCacheKey = repositoryPaths?.gitCommonDir;
-    const [numstatStdout, defaultBranch, hasPrimaryRemote] = yield* Effect.all(
+    const [numstatStdout, defaultBranch, hasPrimaryRemote, headOid] = yield* Effect.all(
       [
         executeGitWithStableDiagnostics(
           "GitVcsDriver.statusDetails.numstat",
@@ -1669,6 +1669,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         statusCacheKey
           ? Cache.get(originExistsCache, statusCacheKey).pipe(Effect.orElseSucceed(() => false))
           : originRemoteExists(cwd).pipe(Effect.orElseSucceed(() => false)),
+        // Best-effort HEAD oid for drift detection; omitted (undefined) when
+        // HEAD cannot be resolved so a failed lookup never fails the status.
+        runGitStdout("GitVcsDriver.statusDetails.headOid", cwd, ["rev-parse", "HEAD"]).pipe(
+          Effect.map((stdout) => stdout.trim()),
+          Effect.orElseSucceed(() => undefined),
+        ),
       ],
       { concurrency: "unbounded" },
     );
@@ -1756,6 +1762,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       isDefaultBranch,
       branch: refName,
       upstreamRef,
+      ...(headOid !== undefined ? { headOid } : {}),
       hasWorkingTreeChanges,
       workingTree: {
         files,
@@ -1809,6 +1816,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         hasPrimaryRemote: details.hasOriginRemote,
         isDefaultRef: details.isDefaultBranch,
         refName: details.branch,
+        ...(details.headOid !== undefined ? { headOid: details.headOid } : {}),
         hasWorkingTreeChanges: details.hasWorkingTreeChanges,
         workingTree: details.workingTree,
         hasUpstream: details.hasUpstream,

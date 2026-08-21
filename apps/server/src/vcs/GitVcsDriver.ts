@@ -62,6 +62,7 @@ export interface GitStatusDetails {
   isDefaultBranch: boolean;
   branch: string | null;
   upstreamRef: string | null;
+  headOid?: string | undefined;
   hasWorkingTreeChanges: boolean;
   workingTree: VcsStatusResult["workingTree"];
   hasUpstream: boolean;
