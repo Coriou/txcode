@@ -59,9 +59,9 @@ jobs:
           COUNT: ${{ steps.compare.outputs.count }}
         run: |
           TITLE="upstream moved $COUNT commits"
-          ISSUE_NUMBER="$(gh issue list --repo "$GITHUB_REPOSITORY" --search '"'"'$TITLE'"'"' in:title --state open --json number --jq '.[0].number // empty')"
-          BODY="$(cat body.md)
+          ISSUE_NUMBER="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --json number,title --jq '.[] | select(.title | startswith("upstream moved ")) | .number' | head -1)"
 
+          BODY="$(cat body.md)
           ---
           _Automated sync-check report. No merge was performed — merging is always manual._
           "
