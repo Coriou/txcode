@@ -1,0 +1,72 @@
+name: Upstream sync check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream main
+        run: git remote add upstream https://github.com/pingdotgg/t3code.git && git fetch upstream main
+
+      - name: Compare against last synced SHA
+        id: compare
+        env:
+          LAST_SYNCED: ${{ vars.LAST_SYNCED_UPSTREAM_SHA }}
+        run: |
+          UPSTREAM_SHA="$(git rev-parse upstream/main)"
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$UPSTREAM_SHA" = "$LAST_SYNCED" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream unchanged ($UPSTREAM_SHA)"; exit 0
+          fi
+          COUNT="$(git rev-list --count "$LAST_SYNCED..upstream/main")"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          git shortlog --no-merges "$LAST_SYNCED..upstream/main" > shortlog.txt || true
+          {
+            echo "### New commits: $COUNT"
+            echo '```'
+            cat shortlog.txt
+            echo '```'
+            echo "### Touchpoint overlap"
+            git diff --name-only "$LAST_SYNCED..upstream/main" | grep -E \
+              '(^apps/server/src/provider/(Drivers/OmpDriver|Layers/OmpAdapter|Services/OmpAdapter|acp/OmpAcpSupport)|^apps/server/src/textGeneration/OmpTextGeneration|^packages/contracts/src/(settings|model)|^apps/web/src/session-logic|^apps/web/src/components/chat/providerIconUtils|^apps/web/src/components/settings/providerDriverMeta|^apps/web/src/components/Icons|^apps/mobile/src/components/ProviderIcon|^apps/mobile/src/lib/modelOptions|^apps/mobile/src/features/threads/ThreadSettingsSheet)' \
+              > overlap.txt || true
+            if [ -s overlap.txt ]; then
+              echo "Files overlapping fork feature touchpoints:"; cat overlap.txt
+            else
+              echo "None — zero overlap between new upstream changes and fork feature touchpoints."
+            fi
+          } >> body.md
+
+      - name: Open or update tracking issue
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COUNT: ${{ steps.compare.outputs.count }}
+        run: |
+          TITLE="upstream moved $COUNT commits"
+          ISSUE_NUMBER="$(gh issue list --repo "$GITHUB_REPOSITORY" --search '"'"'$TITLE'"'"' in:title --state open --json number --jq '.[0].number // empty')"
+          BODY="$(cat body.md)
+
+          ---
+          _Automated sync-check report. No merge was performed — merging is always manual._
+          "
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi
