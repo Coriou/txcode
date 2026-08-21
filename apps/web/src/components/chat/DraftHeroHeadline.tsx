@@ -10,9 +10,11 @@ import { selectProjectGroupingSettings } from "~/logicalProject";
 import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
+  type SidebarProjectSnapshot,
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { describeWorkspaceDrift, useWorkspaceDriftVerdict } from "~/state/workspaceDrift";
+import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Menu,
@@ -24,6 +26,35 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+
+/** Quiet drift warning shown under picker entries whose target copy may lag its siblings. */
+function ProjectDriftHint(props: { readonly group: SidebarProjectSnapshot }) {
+  const verdict = useWorkspaceDriftVerdict(
+    props.group.memberProjects.map((m) => ({
+      environmentId: m.environmentId,
+      projectId: m.id,
+      workspaceRoot: m.workspaceRoot,
+    })),
+  );
+  const message = useMemo(
+    () =>
+      verdict === null
+        ? null
+        : describeWorkspaceDrift({
+            verdict,
+            // Non-preferred entries always target the group's representative copy.
+            preferredEnvironmentId: props.group.environmentId,
+            resolveEnvironmentLabel: (environmentId) =>
+              props.group.memberProjects.find((member) => member.environmentId === environmentId)
+                ?.environmentLabel ?? null,
+          }),
+    [verdict, props.group],
+  );
+  if (message === null) {
+    return null;
+  }
+  return <span className="block truncate text-muted-foreground text-xs">{message}</span>;
+}
 
 interface DraftHeroHeadlineProps {
   readonly activeProjectRef: ScopedProjectRef | null;
@@ -134,17 +165,26 @@ export function DraftHeroHeadline({
             });
           }}
         >
-          {projectPickerEntries.map(({ group }) => {
+          {projectPickerEntries.map((entry) => {
             return (
-              <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
-                <Tooltip>
-                  <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
-                    {group.displayName}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top" className="max-w-80">
-                    {group.displayName}
-                  </TooltipPopup>
-                </Tooltip>
+              <MenuRadioItem
+                key={entry.group.projectKey}
+                value={entry.group.projectKey}
+                closeOnClick
+              >
+                <span className="block min-w-0">
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
+                      {entry.group.displayName}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top" className="max-w-80">
+                      {entry.group.displayName}
+                    </TooltipPopup>
+                  </Tooltip>
+                  {!entry.isPreferred && entry.group.memberProjects.length > 1 ? (
+                    <ProjectDriftHint group={entry.group} />
+                  ) : null}
+                </span>
               </MenuRadioItem>
             );
           })}

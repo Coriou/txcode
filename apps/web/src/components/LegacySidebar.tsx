@@ -115,6 +115,11 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
+import {
+  describeWorkspaceDrift,
+  useWorkspaceDriftVerdict,
+  type WorkspaceDriftWatchedMember,
+} from "../state/workspaceDrift";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   buildThreadRouteParams,
@@ -1094,6 +1099,8 @@ interface SidebarProjectItemProps {
   dragHandleProps: SortableProjectHandleProps | null;
 }
 
+const NO_DRIFT_MEMBERS: WorkspaceDriftWatchedMember[] = [];
+
 const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjectItemProps) {
   const {
     project,
@@ -1242,6 +1249,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         ]),
       ),
     [project.memberProjects],
+  );
+  // Drift only exists between copies; skip the status subscriptions entirely
+  // for single-member groups.
+  const workspaceDriftVerdict = useWorkspaceDriftVerdict(
+    project.memberProjects.length > 1
+      ? project.memberProjects.map((m) => ({
+          environmentId: m.environmentId,
+          projectId: m.id,
+          workspaceRoot: m.workspaceRoot,
+        }))
+      : NO_DRIFT_MEMBERS,
   );
   const memberThreadCountByPhysicalKey = useMemo(() => {
     const counts = new Map<string, number>(
@@ -1902,6 +1920,35 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         setOpenMobile(false);
       }
       void (async () => {
+        // Starting work on a copy that has drifted from its siblings gets one
+        // quiet confirmation; the preferred copy and unknown states never ask.
+        const isNonPreferredMember =
+          project.memberProjects.length > 1 &&
+          (member.environmentId !== project.environmentId || member.id !== project.id);
+        const driftWarning =
+          isNonPreferredMember && workspaceDriftVerdict?.kind === "diverged"
+            ? describeWorkspaceDrift({
+                verdict: workspaceDriftVerdict,
+                // The snapshot's top-level project fields are the group's
+                // preferred (representative) copy.
+                preferredEnvironmentId: project.environmentId,
+                resolveEnvironmentLabel: (environmentId) =>
+                  project.memberProjects.find(
+                    (candidate) => candidate.environmentId === environmentId,
+                  )?.environmentLabel ?? null,
+              })
+            : null;
+        if (driftWarning !== null) {
+          const api = readLocalApi();
+          if (api) {
+            const confirmed = await api.dialogs.confirm(
+              [`Start a thread in this copy of "${member.title}"?`, driftWarning].join("\n"),
+            );
+            if (!confirmed) {
+              return;
+            }
+          }
+        }
         // No options: branch, worktree, and env mode come from the user's
         // configured defaults, never from the currently viewed thread.
         const result = await settlePromise(() =>
@@ -1919,7 +1966,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         }
       })();
     },
-    [handleNewThread, isMobile, setOpenMobile],
+    [
+      handleNewThread,
+      isMobile,
+      setOpenMobile,
+      project.environmentId,
+      project.id,
+      project.memberProjects,
+      workspaceDriftVerdict,
+    ],
   );
 
   const handleCreateThreadClick = useCallback(

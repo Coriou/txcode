@@ -159,8 +159,49 @@ import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore"
 import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
+  type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import type { Project } from "../types";
+import { useWorkspaceDriftVerdict } from "../state/workspaceDrift";
+
+/** Short muted suffix for entries whose target copy has drifted from its siblings. */
+function ProjectDriftSuffix(props: { readonly group: SidebarProjectSnapshot }) {
+  const verdict = useWorkspaceDriftVerdict(
+    props.group.memberProjects.map((m) => ({
+      environmentId: m.environmentId,
+      projectId: m.id,
+      workspaceRoot: m.workspaceRoot,
+    })),
+  );
+  if (verdict?.kind !== "diverged") {
+    return null;
+  }
+  const resolveEnvironmentLabel = (environmentId: Project["environmentId"]) =>
+    props.group.memberProjects.find((member) => member.environmentId === environmentId)
+      ?.environmentLabel ?? null;
+  // Non-preferred entries always target the group's representative copy.
+  const suffix =
+    verdict.heads.length > 1
+      ? `differs from ${resolveEnvironmentLabel(props.group.environmentId) ?? "your preferred copy"}`
+      : verdict.dirtyMembers.length > 0
+        ? `uncommitted changes on ${[
+            ...new Set(
+              verdict.dirtyMembers.map(
+                (member) => resolveEnvironmentLabel(member.environmentId) ?? "another environment",
+              ),
+            ),
+          ].join(", ")}`
+        : null;
+  if (suffix === null) {
+    return null;
+  }
+  return (
+    <>
+      <CommandPaletteMetaDot />
+      <span className="truncate text-muted-foreground/70">{suffix}</span>
+    </>
+  );
+}
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -1025,6 +1066,17 @@ function OpenCommandPaletteDialog(props: {
     [openProjectFromSearch, pickerProjects, projectGroupByTargetKey],
   );
 
+  // Only entries the user would NOT land on from their current context can
+  // carry a drift warning; the contextual entry is never warned about.
+  const driftCandidateKeys = useMemo(
+    () =>
+      new Set(
+        projectPickerEntries
+          .filter((entry) => !entry.isPreferred && entry.group.memberProjects.length > 1)
+          .map((entry) => `${entry.targetProject.environmentId}:${entry.targetProject.id}`),
+      ),
+    [projectPickerEntries],
+  );
   const projectThreadItems = useMemo(
     () =>
       enumerateCommandPaletteItems(
@@ -1045,6 +1097,7 @@ function OpenCommandPaletteDialog(props: {
               kind: "remote",
               label: "Remote",
             };
+            const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
             return (
               <span className="flex min-w-0 items-center gap-1">
                 <span className="inline-flex min-w-0 items-center gap-1">
@@ -1055,6 +1108,10 @@ function OpenCommandPaletteDialog(props: {
                 </span>
                 <CommandPaletteMetaDot />
                 <span className="truncate">{project.workspaceRoot}</span>
+                {group !== undefined &&
+                driftCandidateKeys.has(`${project.environmentId}:${project.id}`) ? (
+                  <ProjectDriftSuffix group={group} />
+                ) : null}
               </span>
             );
           },
@@ -1078,6 +1135,7 @@ function OpenCommandPaletteDialog(props: {
       ),
     [
       contextualProjectRef,
+      driftCandidateKeys,
       handleNewThread,
       pickerProjects,
       projectEnvironmentLocationById,

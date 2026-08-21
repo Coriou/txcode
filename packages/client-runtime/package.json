@@ -150,6 +150,10 @@
     "./state/vcs": {
       "types": "./src/state/vcs.ts",
       "default": "./src/state/vcs.ts"
+    },
+    "./state/workspace-drift": {
+      "types": "./src/state/workspaceDrift.ts",
+      "default": "./src/state/workspaceDrift.ts"
     }
   },
   "scripts": {

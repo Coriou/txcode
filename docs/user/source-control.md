@@ -53,6 +53,20 @@ T3 Code works with the platforms your team already uses:
 - Works on GitHub, GitLab, and Bitbucket. Azure DevOps takes a new title and description; its
   comments stay read-only here, as they already were
 
+### Work Across Copies of the Same Repository
+
+If you keep the same repository open on more than one machine or environment, T3 Code groups
+those copies together as one project and watches for drift between them. Before you start work
+in a copy other than your preferred one, T3 Code tells you when it no longer matches:
+
+- **Different branch or commit** – the copies are checked out at different points in history
+- **Uncommitted changes** – one copy has local edits the others do not
+
+The notice appears wherever you choose which copy to work in: the composer's project picker, the
+command palette, and the sidebar's new-thread menu. It is only a heads-up — nothing is blocked,
+and continuing proceeds exactly as usual. Copies that match need no confirmation, and your
+preferred copy is never flagged.
+
 ### Know Your Setup at a Glance
 
 The **Source Control settings** page shows you exactly what's connected:
