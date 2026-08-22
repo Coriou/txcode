@@ -85,7 +85,7 @@ export class DesktopEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
 
-const APP_BASE_NAME = "10x Code";
+const APP_BASE_NAME = "Tx Code";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -100,13 +100,18 @@ function resolveDesktopAppStageLabel(input: {
 
 function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
+  readonly isPackaged: boolean;
   readonly appVersion: string;
 }): DesktopAppBranding {
   const stageLabel = resolveDesktopAppStageLabel(input);
+  // A packaged stable build is the product proper and carries no stage suffix;
+  // unpackaged stable runs keep the historical "(Alpha)" launcher label.
+  const displayName =
+    stageLabel === "Alpha" && input.isPackaged ? APP_BASE_NAME : `${APP_BASE_NAME} (${stageLabel})`;
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName,
   };
 }
 
@@ -169,6 +174,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
       : appRoot;
   const branding = resolveDesktopAppBranding({
     isDevelopment,
+    isPackaged: input.isPackaged,
     appVersion: input.appVersion,
   });
   const displayName = branding.displayName;
@@ -178,8 +184,11 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+  const userDataDirName = isDevelopment ? "t3code-dev" : "txcode";
+  // The fork never shipped under the official app's identity, so the prod arm
+  // points at a directory no install can ever have created: migration from the
+  // official app's state must stay impossible.
+  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "Tx Code (Legacy)";
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",
@@ -224,10 +233,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
     branding,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
+      isDevelopment ? "net.coriou.txcode.dev" : "net.coriou.txcode",
     ),
-    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "txcode.desktop",
+    linuxWmClass: isDevelopment ? "t3code-dev" : "txcode",
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,
