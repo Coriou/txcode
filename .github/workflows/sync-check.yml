@@ -26,6 +26,9 @@ jobs:
         env:
           LAST_SYNCED: ${{ vars.LAST_SYNCED_UPSTREAM_SHA }}
         run: |
+          if [ -z "$LAST_SYNCED" ]; then
+            echo "::error::vars.LAST_SYNCED_UPSTREAM_SHA is not set — configure it with the last synced upstream SHA"; exit 1
+          fi
           UPSTREAM_SHA="$(git rev-parse upstream/main)"
           echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
           if [ "$UPSTREAM_SHA" = "$LAST_SYNCED" ]; then
