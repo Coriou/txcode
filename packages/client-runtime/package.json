@@ -119,6 +119,10 @@
       "types": "./src/state/shell.ts",
       "default": "./src/state/shell.ts"
     },
+    "./state/threadNotifications": {
+      "types": "./src/state/threadNotifications.ts",
+      "default": "./src/state/threadNotifications.ts"
+    },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
       "default": "./src/state/sourceControl.ts"

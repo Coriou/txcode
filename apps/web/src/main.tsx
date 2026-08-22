@@ -10,7 +10,7 @@ import "./index.css";
 import { isElectron } from "./env";
 import { ManagedRelayAuthProvider } from "./cloud/managedAuth";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
-import { getRouter } from "./router";
+import { getRouter, setActiveRouter } from "./router";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -22,7 +22,7 @@ import { clerkAppearance } from "./components/clerk/clerkAppearance";
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
-
+setActiveRouter(router);
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);
   syncDocumentWindowControlsOverlayClass();

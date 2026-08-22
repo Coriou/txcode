@@ -6,6 +6,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
+  type NotificationFocusRule,
   ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
@@ -156,6 +157,12 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const NOTIFICATION_FOCUS_RULE_LABELS: Record<NotificationFocusRule, string> = {
+  always: "Always",
+  unfocused: "When unfocused",
+  "unfocused-or-different-thread": "When unfocused or viewing another thread",
+};
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
@@ -532,6 +539,22 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
       ...getChangedBrowserSettingLabels(settings),
+      ...(settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted
+        ? ["Turn completion notifications"]
+        : []),
+      ...(settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure
+        ? ["Failure notifications"]
+        : []),
+      ...(settings.notifyOnApprovalRequested !== DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested
+        ? ["Approval request notifications"]
+        : []),
+      ...(settings.notifyOnUserInputRequested !==
+      DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested
+        ? ["Input request notifications"]
+        : []),
+      ...(settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule
+        ? ["Notification focus rule"]
+        : []),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
@@ -569,6 +592,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
+      settings.notifyOnTurnCompleted,
+      settings.notifyOnFailure,
+      settings.notifyOnApprovalRequested,
+      settings.notifyOnUserInputRequested,
+      settings.notificationFocusRule,
       followSystem,
       theme,
       themeHalves,
@@ -676,6 +704,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
+      notifyOnTurnCompleted: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted,
+      notifyOnFailure: DEFAULT_UNIFIED_SETTINGS.notifyOnFailure,
+      notifyOnApprovalRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested,
+      notifyOnUserInputRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested,
+      notificationFocusRule: DEFAULT_UNIFIED_SETTINGS.notificationFocusRule,
     });
     onRestored?.();
   }, [
@@ -1789,6 +1822,45 @@ function LegacyFeaturesSection() {
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
+  const showNotificationsBlockedToast = useCallback(() => {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: "Notifications blocked",
+        description: "Enable notifications for this site in your browser settings.",
+      }),
+    );
+  }, []);
+  // The desktop app owns its OS notification-center access, so the browser
+  // permission flow below runs only on the web. A "denied" answer is final:
+  // browsers ignore repeated requestPermission calls, so the user is pointed
+  // at their browser settings instead and the toggle stays off.
+  const handleNotificationToggle = useCallback(
+    async (
+      patch:
+        | { notifyOnTurnCompleted: boolean }
+        | { notifyOnFailure: boolean }
+        | { notifyOnApprovalRequested: boolean }
+        | { notifyOnUserInputRequested: boolean },
+      enabled: boolean,
+    ) => {
+      if (!isElectron && enabled && typeof window !== "undefined" && "Notification" in window) {
+        if (Notification.permission === "denied") {
+          showNotificationsBlockedToast();
+          return;
+        }
+        if (Notification.permission === "default") {
+          const permission = await Notification.requestPermission();
+          if (permission !== "granted") {
+            showNotificationsBlockedToast();
+            return;
+          }
+        }
+      }
+      updateSettings(patch);
+    },
+    [showNotificationsBlockedToast, updateSettings],
+  );
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
@@ -2375,6 +2447,171 @@ export function GeneralSettingsPanel() {
                 }}
               />
             </div>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection id="notifications" title="Notifications">
+        <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
+          Desktop notifications come from your operating system's notification center. In the
+          browser, T3 Code asks for notification permission the first time you enable one.
+        </p>
+
+        <SettingsRow
+          {...searchableSetting("notify-turn-completed")}
+          description="Get notified when a thread finishes responding."
+          resetAction={
+            settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted ? (
+              <SettingResetButton
+                label="turn completion notifications"
+                onClick={() =>
+                  updateSettings({
+                    notifyOnTurnCompleted: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notifyOnTurnCompleted}
+              onCheckedChange={(checked) =>
+                void handleNotificationToggle({ notifyOnTurnCompleted: Boolean(checked) }, checked)
+              }
+              aria-label="Notify on turn completion"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("notify-failures")}
+          description="Get notified when a thread run fails."
+          resetAction={
+            settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure ? (
+              <SettingResetButton
+                label="failure notifications"
+                onClick={() =>
+                  updateSettings({ notifyOnFailure: DEFAULT_UNIFIED_SETTINGS.notifyOnFailure })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notifyOnFailure}
+              onCheckedChange={(checked) =>
+                void handleNotificationToggle({ notifyOnFailure: Boolean(checked) }, checked)
+              }
+              aria-label="Notify on failure"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("notify-approval-requests")}
+          description="Get notified when a tool call waits for your approval."
+          resetAction={
+            settings.notifyOnApprovalRequested !==
+            DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested ? (
+              <SettingResetButton
+                label="approval request notifications"
+                onClick={() =>
+                  updateSettings({
+                    notifyOnApprovalRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notifyOnApprovalRequested}
+              onCheckedChange={(checked) =>
+                void handleNotificationToggle(
+                  { notifyOnApprovalRequested: Boolean(checked) },
+                  checked,
+                )
+              }
+              aria-label="Notify on approval requests"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("notify-input-requests")}
+          description="Get notified when a thread is waiting for your input."
+          resetAction={
+            settings.notifyOnUserInputRequested !==
+            DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested ? (
+              <SettingResetButton
+                label="input request notifications"
+                onClick={() =>
+                  updateSettings({
+                    notifyOnUserInputRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.notifyOnUserInputRequested}
+              onCheckedChange={(checked) =>
+                void handleNotificationToggle(
+                  { notifyOnUserInputRequested: Boolean(checked) },
+                  checked,
+                )
+              }
+              aria-label="Notify on input requests"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("notification-focus-rule")}
+          description="Choose when notifications may appear: always, only while the app is unfocused, or also while you are viewing a different thread."
+          resetAction={
+            settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule ? (
+              <SettingResetButton
+                label="notification focus rule"
+                onClick={() =>
+                  updateSettings({
+                    notificationFocusRule: DEFAULT_UNIFIED_SETTINGS.notificationFocusRule,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.notificationFocusRule}
+              onValueChange={(value) => {
+                if (
+                  value === "always" ||
+                  value === "unfocused" ||
+                  value === "unfocused-or-different-thread"
+                ) {
+                  updateSettings({ notificationFocusRule: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Notification focus rule">
+                <SelectValue>
+                  {NOTIFICATION_FOCUS_RULE_LABELS[settings.notificationFocusRule]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="always">
+                  {NOTIFICATION_FOCUS_RULE_LABELS.always}
+                </SelectItem>
+                <SelectItem hideIndicator value="unfocused">
+                  {NOTIFICATION_FOCUS_RULE_LABELS.unfocused}
+                </SelectItem>
+                <SelectItem hideIndicator value="unfocused-or-different-thread">
+                  {NOTIFICATION_FOCUS_RULE_LABELS["unfocused-or-different-thread"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
       </SettingsSection>

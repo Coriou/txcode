@@ -168,6 +168,31 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "notify-turn-completed",
+    title: "Turn completion notifications",
+    to: "/settings/general",
+  },
+  {
+    id: "notify-failures",
+    title: "Failure notifications",
+    to: "/settings/general",
+  },
+  {
+    id: "notify-approval-requests",
+    title: "Approval request notifications",
+    to: "/settings/general",
+  },
+  {
+    id: "notify-input-requests",
+    title: "Input request notifications",
+    to: "/settings/general",
+  },
+  {
+    id: "notification-focus-rule",
+    title: "Notification focus rule",
+    to: "/settings/general",
+  },
+  {
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",
