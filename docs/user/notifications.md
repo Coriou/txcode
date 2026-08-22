@@ -25,8 +25,9 @@ The **Focus rule** setting controls when notifications appear relative to what y
 ## Desktop
 
 On the desktop app, notifications use your operating system's native notifications. Clicking one
-brings the existing T3 Code window to the front and opens the thread. If nothing appears, check
-that T3 Code is allowed to send notifications in your system settings.
+always brings T3 Code to the front — reopening the last window or opening a new one if every
+window is closed — and single-thread notifications also open that thread. If nothing appears,
+check that T3 Code is allowed to send notifications in your system settings.
 
 ## Browser
 
@@ -50,4 +51,5 @@ these toggles. Configure them from your mobile app's notification settings.
 - **Provider-independent** – notifications work identically no matter which model provider a
   thread uses, because T3 Code derives them itself from thread activity.
 - **Quiet by design** – bursts of events are collapsed into a single summary notification, and
-  rapid-fire events are throttled so you don't get flooded.
+  rapid-fire events are throttled so you don't get flooded. Summaries behave like normal
+  notifications: clicking one brings the app forward without navigating to a specific thread.

@@ -1064,7 +1064,8 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 export const ShowThreadNotificationInputSchema = Schema.Struct({
   title: TrimmedNonEmptyString,
   body: Schema.String,
-  threadRef: ScopedThreadRef,
+  // Absent for batch summaries: there is no single target thread to open.
+  threadRef: Schema.optional(ScopedThreadRef),
 });
 export type ShowThreadNotificationInput = typeof ShowThreadNotificationInputSchema.Type;
 

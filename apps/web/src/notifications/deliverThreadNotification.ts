@@ -61,6 +61,13 @@ export function presentThreadNotification(
 
 /** Collapse an oversized batch into one summary notification without deep links. */
 export function summarizeThreadNotifications(count: number): void {
+  if (isElectron) {
+    void window.desktopBridge?.showThreadNotification({
+      title: "Threads need your attention",
+      body: `${count} threads have updates.`,
+    });
+    return;
+  }
   if (!webNotificationsAvailable()) return;
   const notification = new Notification("Threads need your attention", {
     body: `${count} threads have updates.`,

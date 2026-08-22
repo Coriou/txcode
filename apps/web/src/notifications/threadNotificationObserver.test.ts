@@ -476,4 +476,94 @@ describe("installThreadNotifications", () => {
 
     expect(harness.deliver).not.toHaveBeenCalled();
   });
+
+  it("delivers again once the dedupe-key TTL has expired", async () => {
+    let current = Date.parse(NOW);
+    const threadId = ThreadId.make("t1");
+    const running = () =>
+      snapshot([makeShell({ id: threadId, latestTurn: turn({ state: "running" }) })]);
+    const completed = () =>
+      snapshot([
+        makeShell({ id: threadId, latestTurn: turn({ state: "completed", completedAt: NOW }) }),
+      ]);
+
+    const harness = installHarness({ now: () => new Date(current).toISOString() });
+    harness.setCatalog([environmentA]);
+    harness.setSnapshot(environmentA, running());
+    harness.setSnapshot(environmentA, completed());
+    await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+
+    // Advance past SHOWN_KEY_TTL_MS (5 x THROTTLE_MS = 25s); the identical
+    // edge replays with the same dedupeKey but the key was pruned.
+    current += 25_000;
+    harness.setSnapshot(environmentA, running());
+    harness.setSnapshot(environmentA, completed());
+    await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
+    const replayCall = harness.deliver.mock.calls.at(1);
+    if (!replayCall) {
+      throw new Error("expected a second deliver call");
+    }
+    expect(replayCall[1]).toBe(0);
+    harness.cleanup();
+  });
+
+  it("ignores updates from a removed environment and re-arms silently when re-added", () => {
+    const harness = installHarness();
+    const shellB = makeShell({ title: "Env B thread", latestTurn: turn({ state: "running" }) });
+
+    harness.setCatalog([environmentA, environmentB]);
+    harness.setSnapshot(environmentA, snapshot([makeShell({ id: shellB.id })]));
+    harness.setSnapshot(environmentB, snapshot([shellB]));
+
+    // Remove B from the catalog: its edges are invisible while unsubscribed.
+    harness.setCatalog([environmentA]);
+    harness.setSnapshot(
+      environmentB,
+      snapshot([
+        makeShell({ id: shellB.id, latestTurn: turn({ state: "error", completedAt: NOW }) }),
+      ]),
+    );
+    expect(harness.deliver).not.toHaveBeenCalled();
+
+    // Re-add B: the first observation re-arms the baseline, never notifies.
+    harness.setCatalog([environmentA, environmentB]);
+    harness.setSnapshot(environmentB, snapshot([shellB]));
+    expect(harness.deliver).not.toHaveBeenCalled();
+    harness.cleanup();
+  });
+
+  it("throttles across environments: one delivery per THROTTLE_MS globally", async () => {
+    const harness = installHarness();
+    const shellA = makeShell({ title: "A", latestTurn: turn({ state: "running" }) });
+    const shellB = makeShell({ title: "B", latestTurn: turn({ state: "running" }) });
+
+    harness.setCatalog([environmentA, environmentB]);
+    harness.setSnapshot(environmentA, snapshot([shellA]));
+    harness.setSnapshot(environmentB, snapshot([shellB]));
+    // Env A's edge delivers first...
+    harness.setSnapshot(
+      environmentA,
+      snapshot([
+        makeShell({
+          id: shellA.id,
+          title: "A",
+          latestTurn: turn({ state: "completed", completedAt: NOW }),
+        }),
+      ]),
+    );
+    await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+    // ...and env B's edge inside the same window is dropped by the GLOBAL throttle.
+    harness.setSnapshot(
+      environmentB,
+      snapshot([
+        makeShell({
+          id: shellB.id,
+          title: "B",
+          latestTurn: turn({ state: "error", completedAt: NOW }),
+        }),
+      ]),
+    );
+    expect(harness.deliver).toHaveBeenCalledTimes(1);
+    harness.cleanup();
+  });
 });

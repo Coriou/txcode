@@ -2,6 +2,7 @@ import type {
   ClientSettings,
   EnvironmentId,
   OrchestrationShellSnapshot,
+  ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
 
@@ -21,7 +22,7 @@ export interface ThreadNotificationTrigger {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly kind: ThreadNotificationKind;
-  /** Idempotent across WS replays: `<threadId>:<kind>:<turnId>[:<completedAt>]`. */
+  /** Idempotent across WS replays: `<id>:<kind>:<turnId>[:<updatedAt|completedAt>]`. */
   readonly dedupeKey: string;
   readonly threadTitle: string;
   readonly occurredAt: string;
@@ -80,7 +81,7 @@ export function diffThreadNotificationTriggers(input: {
         environmentId,
         threadId: shell.id,
         kind: "approval-requested",
-        dedupeKey: `${shell.id}:approval-requested:${turnId}`,
+        dedupeKey: `${shell.id}:approval-requested:${turnId}:${shell.updatedAt}`,
         threadTitle: shell.title,
         occurredAt: now,
       });
@@ -90,7 +91,7 @@ export function diffThreadNotificationTriggers(input: {
         environmentId,
         threadId: shell.id,
         kind: "input-requested",
-        dedupeKey: `${shell.id}:input-requested:${turnId}`,
+        dedupeKey: `${shell.id}:input-requested:${turnId}:${shell.updatedAt}`,
         threadTitle: shell.title,
         occurredAt: now,
       });
@@ -133,8 +134,9 @@ export function diffThreadNotificationTriggers(input: {
 export interface NotificationFocusContext {
   /** Renderer-local window focus (document.hasFocus()). */
   readonly focused: boolean;
-  /** Thread currently open in the UI, if any. */
-  readonly activeThreadId: ThreadId | null;
+  /** Thread currently open in the UI, if any; scoped so cross-environment
+   * ThreadId reuse cannot falsely match. */
+  readonly activeThreadRef: ScopedThreadRef | null;
 }
 
 const TOGGLE_BY_KIND: Record<
@@ -155,7 +157,7 @@ const TOGGLE_BY_KIND: Record<
  * All toggles default OFF upstream; this function only reads them.
  */
 export function shouldDeliverThreadNotification(input: {
-  readonly trigger: Pick<ThreadNotificationTrigger, "kind" | "threadId">;
+  readonly trigger: Pick<ThreadNotificationTrigger, "kind" | "environmentId" | "threadId">;
   readonly settings: ThreadNotificationSettings;
   readonly context: NotificationFocusContext;
 }): boolean {
@@ -167,7 +169,11 @@ export function shouldDeliverThreadNotification(input: {
     case "unfocused":
       return !context.focused;
     case "unfocused-or-different-thread":
-      return !context.focused || context.activeThreadId !== trigger.threadId;
+      return (
+        !context.focused ||
+        context.activeThreadRef?.environmentId !== trigger.environmentId ||
+        context.activeThreadRef?.threadId !== trigger.threadId
+      );
   }
 }
 

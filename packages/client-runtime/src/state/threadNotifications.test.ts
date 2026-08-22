@@ -21,6 +21,7 @@ import {
 
 const NOW = "2026-08-22T12:00:00.000Z";
 const environmentA = EnvironmentId.make("environment-a");
+const environmentB = EnvironmentId.make("environment-b");
 
 let seq = 0;
 function makeShell(overrides: Partial<OrchestrationThreadShell> = {}): OrchestrationThreadShell {
@@ -185,7 +186,7 @@ describe("diffThreadNotificationTriggers", () => {
     ).toEqual([]);
   });
 
-  it("fires approval-requested once on false->true edge with dedupeKey <id>:approval-requested:<turnId>", () => {
+  it("fires approval-requested once on false->true edge with dedupeKey <id>:approval-requested:<turnId>:<updatedAt>", () => {
     const threadId = ThreadId.make("t1");
     const triggers = diffThreadNotificationTriggers({
       environmentId: environmentA,
@@ -202,7 +203,7 @@ describe("diffThreadNotificationTriggers", () => {
     expect(triggers).toHaveLength(1);
     expect(triggers[0]).toMatchObject({
       kind: "approval-requested",
-      dedupeKey: "t1:approval-requested:turn-1",
+      dedupeKey: "t1:approval-requested:turn-1:2026-08-22T00:00:00.000Z",
     });
   });
 
@@ -240,8 +241,60 @@ describe("diffThreadNotificationTriggers", () => {
     expect(triggers).toHaveLength(1);
     expect(triggers[0]).toMatchObject({
       kind: "input-requested",
-      dedupeKey: "t1:input-requested:turn-1",
+      dedupeKey: "t1:input-requested:turn-1:2026-08-22T00:00:00.000Z",
     });
+  });
+
+  it("re-fires approval-requested when the server re-raises within the same turn", () => {
+    const threadId = ThreadId.make("t1");
+    const shellAt = (input: {
+      readonly hasPendingApprovals: boolean;
+      readonly updatedAt: string;
+    }) =>
+      makeShell({
+        id: threadId,
+        hasPendingApprovals: input.hasPendingApprovals,
+        updatedAt: input.updatedAt,
+        latestTurn: turn({ state: "running" }),
+      });
+    const diff = (previous: OrchestrationThreadShell, next: OrchestrationThreadShell) =>
+      diffThreadNotificationTriggers({
+        environmentId: environmentA,
+        previous: snapshot([previous]),
+        next: snapshot([next]),
+        now: NOW,
+      });
+
+    const firstRequest = diff(
+      shellAt({ hasPendingApprovals: false, updatedAt: "2026-08-22T11:00:00.000Z" }),
+      shellAt({ hasPendingApprovals: true, updatedAt: "2026-08-22T11:05:00.000Z" }),
+    );
+    const resolved = diff(
+      shellAt({ hasPendingApprovals: true, updatedAt: "2026-08-22T11:05:00.000Z" }),
+      shellAt({ hasPendingApprovals: false, updatedAt: "2026-08-22T11:10:00.000Z" }),
+    );
+    const secondRequest = diff(
+      shellAt({ hasPendingApprovals: false, updatedAt: "2026-08-22T11:10:00.000Z" }),
+      shellAt({ hasPendingApprovals: true, updatedAt: "2026-08-22T11:15:00.000Z" }),
+    );
+    // A stale replay of the FIRST request keeps its old updatedAt, so its
+    // dedupeKey still matches and stays suppressed.
+    const replay = diff(
+      shellAt({ hasPendingApprovals: false, updatedAt: "2026-08-22T11:10:00.000Z" }),
+      shellAt({ hasPendingApprovals: true, updatedAt: "2026-08-22T11:05:00.000Z" }),
+    );
+
+    expect(resolved).toEqual([]);
+    expect(firstRequest).toHaveLength(1);
+    expect(secondRequest).toHaveLength(1);
+    expect(firstRequest[0]?.dedupeKey).toBe(
+      "t1:approval-requested:turn-1:2026-08-22T11:05:00.000Z",
+    );
+    expect(secondRequest[0]?.dedupeKey).toBe(
+      "t1:approval-requested:turn-1:2026-08-22T11:15:00.000Z",
+    );
+    expect(secondRequest[0]?.dedupeKey).not.toBe(firstRequest[0]?.dedupeKey);
+    expect(replay[0]?.dedupeKey).toBe(firstRequest[0]?.dedupeKey);
   });
 
   it("suppresses threads that are archived in next", () => {
@@ -302,6 +355,62 @@ describe("diffThreadNotificationTriggers", () => {
     ).toEqual([]);
   });
 
+  it("stays silent when a turn completes while the thread is already snoozed without a hand raise", () => {
+    const threadId = ThreadId.make("t1");
+    // The user snoozed mid-turn at 11:30; an out-of-order snapshot replays the
+    // same turn as completed at 11:00 — before the snooze, so no raised hand
+    // and no notification.
+    expect(
+      diffThreadNotificationTriggers({
+        environmentId: environmentA,
+        previous: snapshot([
+          makeShell({
+            id: threadId,
+            snoozedUntil: "2026-08-22T18:00:00.000Z",
+            snoozedAt: "2026-08-22T11:30:00.000Z",
+            latestTurn: turn({ state: "running" }),
+          }),
+        ]),
+        next: snapshot([
+          makeShell({
+            id: threadId,
+            snoozedUntil: "2026-08-22T18:00:00.000Z",
+            snoozedAt: "2026-08-22T11:30:00.000Z",
+            latestTurn: turn({ state: "completed", completedAt: "2026-08-22T11:00:00.000Z" }),
+          }),
+        ]),
+        now: NOW,
+      }),
+    ).toEqual([]);
+  });
+
+  it("emits approval, input, and completion kinds in order from one combined diff", () => {
+    const threadId = ThreadId.make("t1");
+    const triggers = diffThreadNotificationTriggers({
+      environmentId: environmentA,
+      previous: snapshot([makeShell({ id: threadId, latestTurn: turn({ state: "running" }) })]),
+      next: snapshot([
+        makeShell({
+          id: threadId,
+          hasPendingApprovals: true,
+          hasPendingUserInput: true,
+          latestTurn: turn({ state: "completed", completedAt: NOW }),
+        }),
+      ]),
+      now: NOW,
+    });
+    expect(triggers.map((trigger) => trigger.kind)).toEqual([
+      "approval-requested",
+      "input-requested",
+      "turn-completed",
+    ]);
+    expect(triggers.map((trigger) => trigger.dedupeKey)).toEqual([
+      `t1:approval-requested:turn-1:2026-08-22T00:00:00.000Z`,
+      `t1:input-requested:turn-1:2026-08-22T00:00:00.000Z`,
+      `t1:turn-completed:turn-1:${NOW}`,
+    ]);
+  });
+
   it("notifies a snoozed thread that raises its hand (pending approval)", () => {
     const threadId = ThreadId.make("t1");
     const triggers = diffThreadNotificationTriggers({
@@ -355,9 +464,10 @@ describe("shouldDeliverThreadNotification", () => {
   });
   const trigger = {
     kind: "turn-completed" as const,
+    environmentId: environmentA,
     threadId: ThreadId.make("t1"),
   };
-  const unfocused = { focused: false, activeThreadId: null };
+  const unfocused = { focused: false, activeThreadRef: null };
 
   it("blocks when the kind's toggle is off", () => {
     expect(
@@ -374,7 +484,10 @@ describe("shouldDeliverThreadNotification", () => {
       shouldDeliverThreadNotification({
         trigger,
         settings: settings({ notificationFocusRule: "always" }),
-        context: { focused: true, activeThreadId: trigger.threadId },
+        context: {
+          focused: true,
+          activeThreadRef: { environmentId: environmentA, threadId: trigger.threadId },
+        },
       }),
     ).toBe(true);
   });
@@ -384,7 +497,7 @@ describe("shouldDeliverThreadNotification", () => {
       shouldDeliverThreadNotification({
         trigger,
         settings: settings({ notificationFocusRule: "unfocused" }),
-        context: { focused: true, activeThreadId: null },
+        context: { focused: true, activeThreadRef: null },
       }),
     ).toBe(false);
   });
@@ -394,7 +507,10 @@ describe("shouldDeliverThreadNotification", () => {
       shouldDeliverThreadNotification({
         trigger,
         settings: settings(),
-        context: { focused: true, activeThreadId: trigger.threadId },
+        context: {
+          focused: true,
+          activeThreadRef: { environmentId: environmentA, threadId: trigger.threadId },
+        },
       }),
     ).toBe(false);
   });
@@ -404,7 +520,29 @@ describe("shouldDeliverThreadNotification", () => {
       shouldDeliverThreadNotification({
         trigger,
         settings: settings(),
-        context: { focused: true, activeThreadId: ThreadId.make("other") },
+        context: {
+          focused: true,
+          activeThreadRef: { environmentId: environmentA, threadId: ThreadId.make("other") },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("focus rule delivers on cross-environment ThreadId reuse", () => {
+    // ClaudeAdapter adopts external resume ids verbatim, so two environments
+    // can expose the SAME ThreadId; only the full scoped ref matches.
+    expect(
+      shouldDeliverThreadNotification({
+        trigger: {
+          kind: "turn-completed",
+          environmentId: environmentA,
+          threadId: ThreadId.make("t1"),
+        },
+        settings: settings(),
+        context: {
+          focused: true,
+          activeThreadRef: { environmentId: environmentB, threadId: ThreadId.make("t1") },
+        },
       }),
     ).toBe(true);
   });

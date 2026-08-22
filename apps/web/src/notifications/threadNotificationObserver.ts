@@ -125,9 +125,9 @@ export function installThreadNotifications(deps: ObserverDeps = {}): () => void 
 
     pruneShownKeys(epoch);
 
-    const activeThreadId = getActiveThreadRoute()?.threadId ?? null;
+    const activeThreadRef = getActiveThreadRoute();
     const settings = readSettings();
-    const context = { focused: focused(), activeThreadId };
+    const context = { focused: focused(), activeThreadRef };
 
     const fresh = triggers.filter((trigger) => !shownKeys.has(trigger.dedupeKey));
     if (fresh.length === 0) return;
