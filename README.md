@@ -1,8 +1,26 @@
+# Tx Code
+
+Tx Code is a community fork of [T3 Code](https://github.com/pingdotgg/t3code), a GUI for
+running coding agents on your machine. It stays close to upstream and adds a small set of
+features that are not in T3 Code (yet):
+
+| Feature                         | Status             | Upstream                                               |
+| ------------------------------- | ------------------ | ------------------------------------------------------ |
+| Oh My Pi provider               | Shipped            | Not tracked                                            |
+| Thread notifications            | Shipped here first | [#2373](https://github.com/pingdotgg/t3code/pull/2373) |
+| Cross-environment drift warning | Shipped            | Not tracked                                            |
+
+The fork merges `upstream/main` on a rolling basis and prefers upstream over the fork: when a
+feature lands in T3 Code and meets the same bar, it is imported and the fork version dropped.
+A weekly CI check compares against upstream and opens an issue when it moves. Everything about
+installing and running the app matches upstream, including `npx t3@latest`. The desktop bundle
+id differs (`net.coriou.txcode`) so a fork build can run beside the official app.
+
 # T3 Code
 
 T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Oh My Pi. If they're set up on your computer, T3 Code can control them.
+Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, and OpenCode. If they're set up on your computer, T3 Code can control them.
 
 ## "Wait, what are you selling me?"
 
@@ -13,14 +31,13 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Oh My Pi. Install and authenticate at least one provider before use:
+> T3 Code currently supports Codex, Claude, Cursor, Grok Build and OpenCode. Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
 > - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
 > - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
 > - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
-> - Oh My Pi: install [Oh My Pi](https://omp.sh) and run `omp setup`
 
 ### Try it out (install-free)
 

@@ -13,7 +13,7 @@
 - [Keeping app and server in sync](./user/updating.md)
 - [Source control integrations](./user/source-control.md)
 - [Background service (Linux)](./user/background-service.md)
-- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [Oh My Pi](./user/providers-omp.md)
+- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 
@@ -44,3 +44,15 @@ policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../A
 - [Observability](./operations/observability.md)
 - [Relay observability](./operations/relay-observability.md)
 - [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+
+---
+
+## Fork notes
+
+Tx Code is a community fork of [T3 Code](https://github.com/pingdotgg/t3code). Fork-only pages:
+
+- Oh My Pi provider: [providers-omp.md](./user/providers-omp.md)
+
+Fork behavior inside upstream pages:
+
+- Drift warning between copies of one repository: [source-control.md](./user/source-control.md)
