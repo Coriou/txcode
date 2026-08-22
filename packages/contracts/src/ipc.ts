@@ -87,10 +87,10 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
-import { EnvironmentId } from "./baseSchemas.ts";
+import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
-import { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import { ExecutionEnvironmentDescriptor, ScopedThreadRef } from "./environment.ts";
 import type { ClientSettings } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
 import type {
@@ -1061,6 +1061,13 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+export const ShowThreadNotificationInputSchema = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  body: Schema.String,
+  threadRef: ScopedThreadRef,
+});
+export type ShowThreadNotificationInput = typeof ShowThreadNotificationInputSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   /**
@@ -1129,6 +1136,8 @@ export interface DesktopBridge {
    */
   probeRemoteEditors?: () => Promise<readonly EditorId[]>;
   onMenuAction: (listener: (action: string) => void) => () => void;
+  showThreadNotification: (input: ShowThreadNotificationInput) => Promise<void>;
+  onThreadNotificationActivate: (listener: (ref: ScopedThreadRef) => void) => () => void;
   /**
    * Hold-to-quit hint pushes: "down" when the quit shortcut is first pressed,
    * "up" when it is released before the hold completes. Optional: older

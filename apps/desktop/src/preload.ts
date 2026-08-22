@@ -110,6 +110,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
   probeRemoteEditors: () => ipcRenderer.invoke(IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL, undefined),
+  showThreadNotification: (input) =>
+    ipcRenderer.invoke(IpcChannels.SHOW_THREAD_NOTIFICATION_CHANNEL, input),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
       if (typeof action !== "string") return;
@@ -119,6 +121,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
+    };
+  },
+  onThreadNotificationActivate: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, ref: unknown) => {
+      if (typeof ref !== "object" || ref === null) return;
+      listener(ref as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(IpcChannels.THREAD_NOTIFICATION_ACTIVATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(IpcChannels.THREAD_NOTIFICATION_ACTIVATE_CHANNEL, wrappedListener);
     };
   },
   onQuitShortcut: (listener) => {

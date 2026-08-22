@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 
 import * as DesktopIpc from "./DesktopIpc.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
+import { showThreadNotification } from "./methods/notifications.ts";
 import {
   clearConnectionCatalog,
   getConnectionCatalog,
@@ -87,6 +88,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
   yield* ipc.handle(probeRemoteEditors);
+  yield* ipc.handle(showThreadNotification);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);
