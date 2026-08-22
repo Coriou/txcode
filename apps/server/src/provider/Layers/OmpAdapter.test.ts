@@ -7,13 +7,21 @@ import * as NodeURL from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { OmpSettings, ProviderDriverKind, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import * as TestClock from "effect/testing/TestClock";
+import {
+  OmpSettings,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -295,6 +303,48 @@ ompAdapterTestLayer("OmpAdapterLive", (it) => {
       assert.equal(thread.turns.length, 2);
       yield* adapter.stopSession(threadId);
     }),
+  );
+
+  it.effect("stopSession does not wait on an in-flight turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OmpAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_HANG_PROMPT_FOREVER: "1" }),
+      );
+      yield* serverSettings.updateSettings({
+        providers: { omp: { binaryPath: wrapperPath, enabled: true } },
+      });
+      const threadId = ThreadId.make("omp-stop-during-in-flight-turn");
+      const turnStarted = yield* Deferred.make<TurnId>();
+      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        event.type === "turn.started" &&
+        event.turnId !== undefined &&
+        String(event.threadId) === String(threadId)
+          ? Deferred.succeed(turnStarted, event.turnId).pipe(Effect.asVoid)
+          : Effect.void,
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("omp"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      const sendTurnFiber = yield* adapter
+        .sendTurn({ threadId, input: "hang forever", attachments: [] })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(turnStarted).pipe(Effect.timeout("10 seconds"));
+
+      // The thread lock must stay free while the prompt RPC is in flight, so
+      // stopping (e.g. via thread deletion) cannot block on the model turn.
+      yield* adapter.stopSession(threadId).pipe(Effect.timeout("5 seconds"));
+      assert.equal(yield* adapter.hasSession(threadId), false);
+
+      yield* Fiber.interrupt(eventsFiber);
+      yield* Fiber.interrupt(sendTurnFiber);
+    }).pipe(TestClock.withLive),
   );
 
   it.effect("auto-approves OMP edit gates in auto-accept-edits mode", () =>
