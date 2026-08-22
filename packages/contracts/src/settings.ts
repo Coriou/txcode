@@ -116,6 +116,15 @@ export const EnvironmentIdentificationMode = Schema.Literals(["artwork", "pill",
 export type EnvironmentIdentificationMode = typeof EnvironmentIdentificationMode.Type;
 export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationMode = "artwork";
 
+export const NotificationFocusRule = Schema.Literals([
+  "always",
+  "unfocused",
+  "unfocused-or-different-thread",
+]);
+export type NotificationFocusRule = typeof NotificationFocusRule.Type;
+export const DEFAULT_NOTIFICATION_FOCUS_RULE: NotificationFocusRule =
+  "unfocused-or-different-thread";
+
 /**
  * A user-chosen font family (a single name or a comma-separated list). Empty
  * means "use the app default"; clients compose their own fallback stacks.
@@ -219,6 +228,18 @@ export const ClientSettingsSchema = Schema.Struct({
   // old keys, so everyone, including prior beta opt-outs, resets to the new
   // default sidebar.
   legacySidebarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // ── Notifications ──
+  // All default OFF: notifications are strictly opt-in (upstream PRs #976/#1780
+  // died partly over noisy defaults).
+  notifyOnTurnCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  notifyOnFailure: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  notifyOnApprovalRequested: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  notifyOnUserInputRequested: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  notificationFocusRule: NotificationFocusRule.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_NOTIFICATION_FOCUS_RULE)),
+  ),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
@@ -948,6 +969,11 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
+  notifyOnTurnCompleted: Schema.optionalKey(Schema.Boolean),
+  notifyOnFailure: Schema.optionalKey(Schema.Boolean),
+  notifyOnApprovalRequested: Schema.optionalKey(Schema.Boolean),
+  notifyOnUserInputRequested: Schema.optionalKey(Schema.Boolean),
+  notificationFocusRule: Schema.optionalKey(NotificationFocusRule),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
