@@ -157,6 +157,6 @@ Full glossary with file links: `docs/internals/glossary.md`
 ## Fork-local: agent memory (not upstream)
 
 Cross-session agent memory for this fork lives OUTSIDE the repo at `~/.memory` (PARA layout; see
-its `README.md`). Session handoff state: `/Users/ben/Projects/github/FORK-STATE.md`. Read/update
+its `README.md`). Session handoff state: `/Users/ben/Projects/github/t3code-docs/FORK-STATE.md`. Read/update
 those instead of rediscovering or recreating them. Never commit memory, research notes, or plan
 artifacts to the repo — even gitignored.
