@@ -171,3 +171,17 @@ Cross-session agent memory for this fork lives OUTSIDE the repo at `~/.memory` (
 its `README.md`). Session handoff state: `/Users/ben/Projects/github/t3code-docs/FORK-STATE.md`. Read/update
 those instead of rediscovering or recreating them. Never commit memory, research notes, or plan
 artifacts to the repo — even gitignored.
+
+## Fork-local: agent LSP (not upstream)
+
+`.omp/lsp.json` registers the Effect-patched TypeScript-Go server (`tsgo --lsp --stdio`, resolved
+from `node_modules/.bin`) with the Oh My Pi harness. Use the lsp tool for definitions, references,
+rename previews, and hover in this repo — hover returns fully-inferred Effect channel types and
+definition/references pierce the `@t3tools/contracts` boundary, both things grep cannot do. Two
+gotchas:
+
+- Anchor renames at the symbol's declaration site. A rename preview anchored at a usage/import
+  site under-reports (observed: 4 of 13 edits); anchored at the declaration it lists all
+  callsites across packages.
+- The first request after server start takes ~18s (monorepo project load); later calls are
+  milliseconds. Don't kill or retry-spam the server during warmup.
