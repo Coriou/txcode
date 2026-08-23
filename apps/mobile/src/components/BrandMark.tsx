@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { Image } from "expo-image";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 
 import { APP_BASE_NAME } from "../lib/mobileBranding";
 

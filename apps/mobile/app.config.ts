@@ -1,6 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
+import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 import { APP_BASE_NAME, MOBILE_APP_DISPLAY_NAMES } from "./src/lib/mobileBranding.ts";
 
 type AppVariant = "development" | "preview" | "production";
