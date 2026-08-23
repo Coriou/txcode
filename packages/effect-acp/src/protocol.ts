@@ -87,6 +87,27 @@ const CLIENT_METHOD_ALIASES: Readonly<Record<string, string>> = {
   "elicitation/complete": CLIENT_METHODS.session_elicitation_complete,
 };
 
+/**
+ * Agents speaking the MCP elicitation dialect (`elicitation/create`) expect a
+ * flat JSON-RPC result (`{ action, content? }`) while the ACP schema models
+ * `action` as a single-key object. Responses to requests that arrived under an
+ * aliased name are flattened so spec-compliant agents keep the nested shape.
+ */
+const flattenElicitationResultForMcpDialect = (value: unknown): unknown => {
+  if (typeof value !== "object" || value === null) return value;
+  const candidate = value as { readonly _meta?: unknown; readonly action?: unknown };
+  if (!Object.hasOwn(candidate, "action")) return value;
+  const action = candidate.action;
+  if (typeof action !== "object" || action === null) return value;
+  const inner = action as { readonly action?: unknown; readonly content?: unknown };
+  if (typeof inner.action !== "string") return value;
+  return {
+    ...(Object.hasOwn(candidate, "_meta") ? { _meta: candidate._meta } : {}),
+    action: inner.action,
+    ...(inner.action === "accept" && inner.content != null ? { content: inner.content } : {}),
+  };
+};
+
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
   options: AcpPatchedProtocolOptions,
 ): Effect.fn.Return<AcpPatchedProtocol, never, Scope.Scope> {
@@ -99,6 +120,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   const nextRequestId = yield* Ref.make(1);
   const terminationHandled = yield* Ref.make(false);
   const extPending = yield* Ref.make(new Map<string, AcpPendingRequest>());
+  const dialectRequestIds = new Set<string>();
 
   const logProtocol = (event: AcpProtocolLogEvent) => {
     if (event.direction === "incoming" && !options.logIncoming) {
@@ -114,8 +136,21 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   };
 
   const offerOutgoing = Effect.fn("offerOutgoing")(function* (
-    message: RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded,
+    incomingMessage: RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded,
   ) {
+    let message = incomingMessage;
+    if (message._tag === "Exit" && dialectRequestIds.has(String(message.requestId))) {
+      dialectRequestIds.delete(String(message.requestId));
+      if (message.exit._tag === "Success") {
+        message = {
+          ...message,
+          exit: {
+            _tag: "Success",
+            value: flattenElicitationResultForMcpDialect(message.exit.value),
+          },
+        };
+      }
+    }
     yield* logProtocol({
       direction: "outgoing",
       stage: "decoded",
@@ -272,9 +307,13 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   };
 
   const handleRequestEncoded = (message: RpcMessage.RequestEncoded) => {
-    const tag = Object.hasOwn(CLIENT_METHOD_ALIASES, message.tag)
+    const aliasedTag = Object.hasOwn(CLIENT_METHOD_ALIASES, message.tag)
       ? CLIENT_METHOD_ALIASES[message.tag]
-      : message.tag;
+      : undefined;
+    const tag = aliasedTag ?? message.tag;
+    if (aliasedTag !== undefined && message.id !== "") {
+      dialectRequestIds.add(String(message.id));
+    }
     if (message.id === "") {
       if (tag === CLIENT_METHODS.session_update) {
         return decodeSessionUpdate(message.payload).pipe(

@@ -255,16 +255,16 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
         );
 
         const outbound = yield* Queue.take(output);
-        const decoded = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(jsonRpcResponse(AcpSchema.ElicitationResponse)),
-        )(typeof outbound === "string" ? outbound : new TextDecoder().decode(outbound));
+        const decoded = JSON.parse(
+          typeof outbound === "string" ? outbound : new TextDecoder().decode(outbound),
+        ) as { id: unknown; result: unknown };
         assert.equal(decoded.id, "omp-1");
+        // oh-my-pi's MCP dialect expects a flat action string plus content, not the
+        // ACP-schema nested action object.
         assert.deepEqual(decoded.result, {
-          action: {
-            action: "accept",
-            content: {
-              approved: true,
-            },
+          action: "accept",
+          content: {
+            approved: true,
           },
         });
         assert.equal((yield* Ref.get(elicitations)).length, 1);
@@ -280,6 +280,61 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     }),
   );
 
+  it.effect("keeps ACP-schema nested elicitation results for spec-named requests", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const context = yield* Layer.buildWithScope(AcpClient.layer(stdio), scope);
+
+      yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.AcpClient;
+        yield* acp.handleElicitation(() =>
+          Effect.succeed({
+            action: {
+              action: "accept" as const,
+              content: {
+                approved: true,
+              },
+            },
+          }),
+        );
+
+        yield* Queue.offer(
+          input,
+          yield* encodeJsonl(jsonRpcRequest("session/elicitation", AcpSchema.ElicitationRequest), {
+            jsonrpc: "2.0",
+            id: "spec-1",
+            headers: [],
+            method: "session/elicitation",
+            params: {
+              sessionId: "session-1",
+              message: "Pick one",
+              mode: "form",
+              requestedSchema: {
+                type: "object",
+                properties: {},
+                required: [],
+              },
+            },
+          }),
+        );
+
+        const outbound = yield* Queue.take(output);
+        const decoded = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(jsonRpcResponse(AcpSchema.ElicitationResponse)),
+        )(typeof outbound === "string" ? outbound : new TextDecoder().decode(outbound));
+        assert.equal(decoded.id, "spec-1");
+        assert.deepEqual(decoded.result, {
+          action: {
+            action: "accept",
+            content: {
+              approved: true,
+            },
+          },
+        });
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
   it.effect(
     "returns structured invalid params without exposing values from typed extension request payloads",
     () =>
