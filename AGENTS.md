@@ -1,3 +1,14 @@
+# Tx Code
+
+Tx Code is a fork of T3 Code. We merge `upstream/main` on a rolling basis and prefer upstream over the fork: when a feature lands in T3 Code and meets the same bar, we adopt it and drop our version. Fork features exist only until upstream ships them properly.
+
+Rules that follow:
+
+- Stay in the spirit of the original app: lightweight, fast, clean. Wrap provider harnesses; never force behavior that makes them slower, more token-hungry, or worse at tool use. No hacks, half-baked features, or overfit special cases.
+- Keep diffs against upstream minimal. No drive-by refactors of upstream code; isolate fork additions and mark them clearly so merges stay cheap.
+- Fork-only code is deliberate, not cruft. Never remove or simplify it as cleanup.
+- Before building anything nontrivial, check upstream first — it may already exist or be in flight.
+
 # T3 Code
 
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, Cursor, Grok, OpenCode) and serves web, desktop, and mobile clients.
