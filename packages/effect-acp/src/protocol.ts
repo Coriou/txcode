@@ -77,6 +77,16 @@ const decodeElicitationComplete = Schema.decodeUnknownEffect(
 );
 const parserFactory = RpcSerialization.ndJsonRpc();
 
+/**
+ * Some ACP agents speak MCP-style elicitation method names over the wire
+ * (oh-my-pi sends `elicitation/create`). Normalize them to the spec names
+ * before routing so dialect differences stay at the transport boundary.
+ */
+const CLIENT_METHOD_ALIASES: Readonly<Record<string, string>> = {
+  "elicitation/create": CLIENT_METHODS.session_elicitation,
+  "elicitation/complete": CLIENT_METHODS.session_elicitation_complete,
+};
+
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
   options: AcpPatchedProtocolOptions,
 ): Effect.fn.Return<AcpPatchedProtocol, never, Scope.Scope> {
@@ -262,8 +272,11 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   };
 
   const handleRequestEncoded = (message: RpcMessage.RequestEncoded) => {
+    const tag = Object.hasOwn(CLIENT_METHOD_ALIASES, message.tag)
+      ? CLIENT_METHOD_ALIASES[message.tag]
+      : message.tag;
     if (message.id === "") {
-      if (message.tag === CLIENT_METHODS.session_update) {
+      if (tag === CLIENT_METHODS.session_update) {
         return decodeSessionUpdate(message.payload).pipe(
           Effect.map(
             (params) =>
@@ -283,7 +296,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           Effect.flatMap(dispatchNotification),
         );
       }
-      if (message.tag === CLIENT_METHODS.session_elicitation_complete) {
+      if (tag === CLIENT_METHODS.session_elicitation_complete) {
         return decodeElicitationComplete(message.payload).pipe(
           Effect.map(
             (params) =>
@@ -305,12 +318,12 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       }
       return dispatchNotification({
         _tag: "ExtNotification",
-        method: message.tag,
+        method: tag,
         params: message.payload,
       });
     }
 
-    if (!options.serverRequestMethods.has(message.tag)) {
+    if (!options.serverRequestMethods.has(tag)) {
       return handleExtRequest(message).pipe(
         Effect.catchTags({
           AcpProtocolParseError: (error) =>
@@ -336,7 +349,9 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       );
     }
 
-    return Queue.offer(serverQueue, message).pipe(Effect.asVoid);
+    const routed =
+      tag === message.tag ? message : ({ ...message, tag } as RpcMessage.RequestEncoded);
+    return Queue.offer(serverQueue, routed).pipe(Effect.asVoid);
   };
 
   const handleExitEncoded = (message: RpcMessage.ResponseExitEncoded) =>

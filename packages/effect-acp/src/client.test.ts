@@ -187,6 +187,99 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     }),
   );
 
+  it.effect("routes MCP-style elicitation method names (oh-my-pi dialect) to spec handlers", () =>
+    Effect.gen(function* () {
+      const elicitations = yield* Ref.make<Array<unknown>>([]);
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const context = yield* Layer.buildWithScope(AcpClient.layer(stdio), scope);
+
+      yield* Effect.gen(function* () {
+        const acp = yield* AcpClient.AcpClient;
+
+        yield* acp.handleElicitation((request) =>
+          Ref.update(elicitations, (current) => [...current, request]).pipe(
+            Effect.as({
+              action: {
+                action: "accept" as const,
+                content: {
+                  approved: true,
+                },
+              },
+            }),
+          ),
+        );
+
+        const completions = yield* Queue.unbounded<unknown>();
+        yield* Stream.runCollect(Stream.take(acp.raw.notifications, 1)).pipe(
+          Effect.flatMap((chunk) => Queue.offer(completions, Array.from(chunk)[0])),
+          Effect.forkScoped,
+        );
+
+        yield* Queue.offer(
+          input,
+          yield* encodeJsonl(jsonRpcRequest("elicitation/create", AcpSchema.ElicitationRequest), {
+            jsonrpc: "2.0",
+            id: "omp-1",
+            headers: [],
+            method: "elicitation/create",
+            params: {
+              sessionId: "session-1",
+              message: "Pick one",
+              mode: "form",
+              requestedSchema: {
+                type: "object",
+                properties: {
+                  choice: {
+                    type: "string",
+                    enum: ["a", "b"],
+                  },
+                },
+                required: ["choice"],
+              },
+            },
+          }),
+        );
+        yield* Queue.offer(
+          input,
+          yield* encodeJsonl(
+            jsonRpcNotification("elicitation/complete", AcpSchema.ElicitationCompleteNotification),
+            {
+              jsonrpc: "2.0",
+              method: "elicitation/complete",
+              params: {
+                elicitationId: "e-1",
+              },
+            },
+          ),
+        );
+
+        const outbound = yield* Queue.take(output);
+        const decoded = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(jsonRpcResponse(AcpSchema.ElicitationResponse)),
+        )(typeof outbound === "string" ? outbound : new TextDecoder().decode(outbound));
+        assert.equal(decoded.id, "omp-1");
+        assert.deepEqual(decoded.result, {
+          action: {
+            action: "accept",
+            content: {
+              approved: true,
+            },
+          },
+        });
+        assert.equal((yield* Ref.get(elicitations)).length, 1);
+        const request = (yield* Ref.get(elicitations))[0] as AcpSchema.ElicitationRequest;
+        assert.equal(request.mode, "form");
+        assert.equal(request.message, "Pick one");
+
+        const completion = (yield* Queue.take(completions)) as {
+          readonly params: AcpSchema.ElicitationCompleteNotification;
+        };
+        assert.equal(completion.params.elicitationId, "e-1");
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
+
   it.effect(
     "returns structured invalid params without exposing values from typed extension request payloads",
     () =>
