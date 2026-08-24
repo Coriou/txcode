@@ -42,6 +42,7 @@ const clientSettings: ClientSettings = {
   notifyOnTurnCompleted: false,
   notifyOnUserInputRequested: false,
   planModeEnabled: false,
+  showSkillsInSlashMenu: false,
   providerModelPreferences: {},
   sidebarAutoSettleAfterDays: 3,
   sidebarAutoSettleOnMerge: true,
