@@ -122,6 +122,7 @@ interface OmpSessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  activeTurnVisibleDeltaCount: number;
   stopped: boolean;
 }
 
@@ -572,6 +573,7 @@ export function makeOmpAdapter(ompSettings: OmpSettings, options?: OmpAdapterLiv
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            activeTurnVisibleDeltaCount: 0,
             stopped: false,
           };
 
@@ -670,6 +672,7 @@ export function makeOmpAdapter(ompSettings: OmpSettings, options?: OmpAdapterLiv
                       event.rawPayload,
                       "acp.jsonrpc",
                     );
+                    ctx.activeTurnVisibleDeltaCount += 1;
                     yield* offerRuntimeEvent(
                       makeAcpContentDeltaEvent({
                         stamp: yield* makeEventStamp(),
@@ -760,6 +763,7 @@ export function makeOmpAdapter(ompSettings: OmpSettings, options?: OmpAdapterLiv
             });
             ctx.activeTurnId = turnId;
             ctx.lastPlanFingerprint = undefined;
+            ctx.activeTurnVisibleDeltaCount = 0;
             ctx.session = {
               ...ctx.session,
               activeTurnId: turnId,
@@ -848,6 +852,12 @@ export function makeOmpAdapter(ompSettings: OmpSettings, options?: OmpAdapterLiv
               model: prepared.model,
             };
 
+            // ACP cannot distinguish "finished silently" from success: OMP
+            // ends empty-stop turns (the model returned no content) with a
+            // normal end_turn after its retry cap, so surface a turn that
+            // streamed zero assistant deltas as failed instead of completing.
+            const cancelled = result.stopReason === "cancelled";
+            const producedContent = ctx.activeTurnVisibleDeltaCount > 0;
             yield* offerRuntimeEvent({
               type: "turn.completed",
               ...(yield* makeEventStamp()),
@@ -855,8 +865,14 @@ export function makeOmpAdapter(ompSettings: OmpSettings, options?: OmpAdapterLiv
               threadId: input.threadId,
               turnId: prepared.turnId,
               payload: {
-                state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                state: cancelled ? "cancelled" : producedContent ? "completed" : "failed",
                 stopReason: result.stopReason ?? null,
+                ...(cancelled || producedContent
+                  ? {}
+                  : {
+                      errorMessage:
+                        "The agent returned no response content (empty completions from the model). Retry the turn or switch models.",
+                    }),
               },
             });
 
