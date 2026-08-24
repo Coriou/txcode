@@ -18,6 +18,7 @@ const emitEditPermission = process.env.T3_ACP_EMIT_EDIT_PERMISSION === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
+const emitToolTickStream = process.env.T3_ACP_EMIT_TOOL_TICK_STREAM === "1";
 const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const emitXAiAskUserQuestion = process.env.T3_ACP_EMIT_XAI_ASK_USER_QUESTION === "1";
 const emitXAiPromptCompleteThenHang = process.env.T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG === "1";
@@ -524,6 +525,12 @@ const program = Effect.gen(function* () {
         return yield* Effect.never;
       }
 
+      if (silentPrompt) {
+        // Simulates OMP's "empty stop" failure mode: the prompt RPC resolves
+        // normally, but no session/update was ever streamed for the turn.
+        return { stopReason: "end_turn" };
+      }
+
       if (emitXAiPromptCompleteThenHang) {
         writeJsonRpcNotification("session/update", {
           sessionId: requestedSessionId,
@@ -626,6 +633,82 @@ const program = Effect.gen(function* () {
           update: {
             sessionUpdate: "agent_message_chunk",
             content: { type: "text", text: "after tool" },
+          },
+        });
+
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitToolTickStream) {
+        const toolCallId = "tool-call-tick-1";
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "before tick tool" },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: "Tick tool",
+            kind: "execute",
+            status: "pending",
+            rawInput: {
+              command: ["echo", "tick"],
+            },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "during tick tool" },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            title: "Tick tool running",
+            status: "in_progress",
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "still ticking" },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            status: "completed",
+            rawOutput: {
+              exitCode: 0,
+              stdout: "tick",
+              stderr: "",
+            },
+          },
+        });
+
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "after tick tool" },
           },
         });
 

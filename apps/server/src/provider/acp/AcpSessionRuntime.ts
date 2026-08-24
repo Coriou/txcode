@@ -292,6 +292,7 @@ export const make = (
       ),
     );
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
+    const surfacedToolCallIdsRef = yield* Ref.make(new Set<string>());
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
     const promptSerializationSemaphore = yield* Semaphore.make(1);
@@ -404,6 +405,7 @@ export const make = (
           modeStateRef,
           toolCallsRef,
           assistantSegmentRef,
+          surfacedToolCallIdsRef,
           assistantItemRuntimeId,
           params: notification,
         });
@@ -838,6 +840,7 @@ const handleSessionUpdate = ({
   modeStateRef,
   toolCallsRef,
   assistantSegmentRef,
+  surfacedToolCallIdsRef,
   assistantItemRuntimeId,
   params,
 }: {
@@ -845,6 +848,7 @@ const handleSessionUpdate = ({
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
+  readonly surfacedToolCallIdsRef: Ref.Ref<Set<string>>;
   readonly assistantItemRuntimeId: string;
   readonly params: EffectAcpSchema.SessionNotification;
 }): Effect.Effect<void> =>
@@ -857,10 +861,6 @@ const handleSessionUpdate = ({
     }
     for (const event of parsed.events) {
       if (event._tag === "ToolCallUpdated") {
-        yield* closeActiveAssistantSegment({
-          queue,
-          assistantSegmentRef,
-        });
         const { previous, merged } = yield* Ref.modify(toolCallsRef, (current) => {
           const previous = current.get(event.toolCall.toolCallId);
           const nextToolCall = mergeToolCallState(previous, event.toolCall);
@@ -874,6 +874,23 @@ const handleSessionUpdate = ({
         });
         if (!shouldEmitToolCallUpdate(previous, merged)) {
           continue;
+        }
+        // The assistant text segment closes only when a tool call's card first
+        // becomes visible to the UI. Progress ticks and terminal updates on an
+        // already-surfaced card must not split surrounding text.
+        const firstSurfacing = yield* Ref.modify(surfacedToolCallIdsRef, (surfaced) => {
+          if (surfaced.has(event.toolCall.toolCallId)) {
+            return [false, surfaced] as const;
+          }
+          const nextSurfaced = new Set(surfaced);
+          nextSurfaced.add(event.toolCall.toolCallId);
+          return [true, nextSurfaced] as const;
+        });
+        if (firstSurfacing) {
+          yield* closeActiveAssistantSegment({
+            queue,
+            assistantSegmentRef,
+          });
         }
         yield* Queue.offer(queue, {
           _tag: "ToolCallUpdated",

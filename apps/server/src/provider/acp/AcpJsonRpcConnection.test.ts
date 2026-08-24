@@ -330,6 +330,62 @@ describe("AcpSessionRuntime", () => {
     ),
   );
 
+  it.effect("keeps the assistant segment open across tool call progress ticks", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(promptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 10)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "AssistantItemStarted",
+        "ContentDelta",
+        "AssistantItemCompleted",
+        "ToolCallUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+        "ToolCallUpdated",
+        "ContentDelta",
+        "ToolCallUpdated",
+        "ContentDelta",
+      ]);
+
+      const secondStarted = notes[4];
+      const tickDelta = notes[7];
+      const finalDelta = notes[9];
+      expect(secondStarted?._tag).toBe("AssistantItemStarted");
+      if (
+        secondStarted?._tag === "AssistantItemStarted" &&
+        tickDelta?._tag === "ContentDelta" &&
+        finalDelta?._tag === "ContentDelta"
+      ) {
+        expect(tickDelta.itemId).toBe(secondStarted.itemId);
+        expect(finalDelta.itemId).toBe(secondStarted.itemId);
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_EMIT_TOOL_TICK_STREAM: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
   it.effect("suppresses generic placeholder tool updates until completion", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
