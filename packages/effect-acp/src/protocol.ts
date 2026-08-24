@@ -504,9 +504,13 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           }),
         ),
         Effect.flatMap((messages) =>
-          Effect.forEach(messages, routeDecodedMessage, {
-            discard: true,
-          }),
+          Effect.forEach(
+            messages,
+            (message) => routeDecodedMessage(normalizeJsonRpcErrorExit(message)),
+            {
+              discard: true,
+            },
+          ),
         ),
       ),
     ),
@@ -625,4 +629,31 @@ function isProtocolError(
     "message" in value &&
     typeof value.message === "string"
   );
+}
+
+/**
+ * Effect's ndjson-rpc parser decodes any JSON-RPC error response as a `Die`
+ * carrying the raw `{ code, message, data? }` object. The client-side defect
+ * schema then flattens that to `new Error(message)`, dropping `code` and
+ * `data` — and ACP agents are plain JSON-RPC peers, so every agent-side
+ * handler failure takes exactly that path. Rewrite those defects into `Fail`
+ * errors so they decode through each RPC's declared `AcpSchema.Error`
+ * failure channel and surface as typed `AcpRequestError`s (the shape
+ * `handleExitEncoded` already expects for extension requests).
+ */
+function normalizeJsonRpcErrorExit(
+  message: RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded,
+): RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded {
+  if (message._tag !== "Exit" || message.exit._tag !== "Failure") {
+    return message;
+  }
+  let normalized = false;
+  const cause = message.exit.cause.map((entry) => {
+    if (entry._tag !== "Die" || !isProtocolError(entry.defect)) {
+      return entry;
+    }
+    normalized = true;
+    return { _tag: "Fail", error: entry.defect } as const;
+  });
+  return normalized ? { ...message, exit: { _tag: "Failure", cause } } : message;
 }

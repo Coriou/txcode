@@ -15,6 +15,68 @@ if (process.env.ACP_MOCK_EXIT_IMMEDIATELY_CODE !== undefined) {
   process.exit(Number(process.env.ACP_MOCK_EXIT_IMMEDIATELY_CODE));
 }
 
+if (process.env.ACP_MOCK_RAW_PROMPT_ERROR === "1") {
+  // Hand-rolled JSON-RPC peer standing in for agents like oh-my-pi: plain
+  // JSON-RPC, and session/prompt failures surfaced through the generic
+  // internal-error envelope with the real cause in data.details.
+  const wire = (payload: unknown) => process.stdout.write(`${JSON.stringify(payload)}\n`);
+  let buffered = "";
+  process.stdin.on("data", (chunk: Buffer) => {
+    buffered += chunk.toString("utf8");
+    let newlineAt: number;
+    while ((newlineAt = buffered.indexOf("\n")) !== -1) {
+      const line = buffered.slice(0, newlineAt);
+      buffered = buffered.slice(newlineAt + 1);
+      handleLine(line);
+    }
+  });
+  function handleLine(line: string): void {
+    if (line.trim() === "") return;
+    const request = JSON.parse(line) as { id?: number | string; method?: string };
+    if (request.id === undefined || request.method === undefined) return;
+    switch (request.method) {
+      case "initialize": {
+        wire({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: { sessionCapabilities: { load: {} } },
+            agentInfo: { name: "raw-mock-agent", version: "0.0.0" },
+          },
+        });
+        break;
+      }
+      case "session/new": {
+        wire({ jsonrpc: "2.0", id: request.id, result: { sessionId: "raw-mock-session-1" } });
+        break;
+      }
+      case "session/prompt": {
+        wire({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: {
+            code: -32603,
+            message: "Internal error",
+            data: {
+              details:
+                "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.",
+            },
+          },
+        });
+        break;
+      }
+      default: {
+        wire({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: { code: -32601, message: "Method not found", data: { method: request.method } },
+        });
+      }
+    }
+  }
+}
+
 const sessionId = "mock-session-1";
 
 const program = Effect.gen(function* () {

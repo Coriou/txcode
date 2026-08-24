@@ -57,6 +57,28 @@ describe("effect-acp errors", () => {
     });
   });
 
+  it.effect("appends agent data.details to the surfaced protocol error message", () => {
+    const details =
+      "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.";
+    const failure = AcpSchema.Error.make({
+      code: -32603,
+      message: "Internal error",
+      data: { details },
+    });
+
+    return Effect.gen(function* () {
+      const error = yield* callRpc("session/prompt", Effect.fail(failure)).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "AcpRequestError",
+        code: -32603,
+        errorMessage: `Internal error: ${details}`,
+        data: { details },
+        method: "session/prompt",
+      });
+    });
+  });
+
   it("does not expose legacy diagnostic detail as the transport message", () => {
     const cause = new Error("connection refused at a private endpoint");
     const error = new AcpError.AcpTransportError({

@@ -185,6 +185,22 @@ export class AcpInputStreamEndedError extends Schema.TaggedErrorClass<AcpInputSt
   }
 }
 
+/**
+ * Agents surface handler failures through the generic JSON-RPC envelope while
+ * the real cause rides in `data.details` (omp's `RequestError.internalError({
+ * details })` convention). Without this the user sees only the generic
+ * message, e.g. "Internal error".
+ */
+const protocolErrorMessage = (error: AcpSchema.Error): string => {
+  const details =
+    typeof error.data === "object" &&
+    error.data !== null &&
+    "details" in error.data &&
+    typeof error.data.details === "string"
+      ? error.data.details
+      : undefined;
+  return details === undefined ? error.message : `${error.message}: ${details}`;
+};
 export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()("AcpRequestError", {
   code: AcpSchema.ErrorCode,
   errorMessage: Schema.String,
@@ -211,7 +227,7 @@ export class AcpRequestError extends Schema.TaggedErrorClass<AcpRequestError>()(
   ) {
     return new AcpRequestError({
       code: error.code,
-      errorMessage: error.message,
+      errorMessage: protocolErrorMessage(error),
       ...(error.data !== undefined ? { data: error.data } : {}),
       method: context.method,
       ...(context.requestId === undefined ? {} : { requestId: context.requestId }),

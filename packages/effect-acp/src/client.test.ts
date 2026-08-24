@@ -187,6 +187,44 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     }),
   );
 
+  it.effect(
+    "surfaces agent JSON-RPC error details as a typed request error (oh-my-pi busy prompt)",
+    () =>
+      Effect.gen(function* () {
+        const handle = yield* makeHandle({ ACP_MOCK_RAW_PROMPT_ERROR: "1" });
+        const scope = yield* Scope.make();
+        const context = yield* Layer.buildWithScope(AcpClient.layerChildProcess(handle), scope);
+
+        const failure = yield* Effect.gen(function* () {
+          const acp = yield* AcpClient.AcpClient;
+          yield* acp.agent.initialize({
+            protocolVersion: 1,
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+            },
+            clientInfo: { name: "effect-acp-test", version: "0.0.0" },
+          });
+          yield* acp.agent.createSession({ cwd: process.cwd(), mcpServers: [] });
+          return yield* acp.agent
+            .prompt({
+              sessionId: "raw-mock-session-1",
+              prompt: [{ type: "text", text: "hello" }],
+            })
+            .pipe(Effect.flip);
+        }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+        const isRequestError = Schema.is(AcpError.AcpRequestError);
+        if (!isRequestError(failure)) {
+          throw new Error(`Expected AcpRequestError, got: ${String(failure)}`);
+        }
+        const details =
+          "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.";
+        assert.equal(failure.code, -32603);
+        assert.equal(failure.message, `Internal error: ${details}`);
+        assert.deepEqual(failure.data, { details });
+      }),
+  );
+
   it.effect("routes MCP-style elicitation method names (oh-my-pi dialect) to spec handlers", () =>
     Effect.gen(function* () {
       const elicitations = yield* Ref.make<Array<unknown>>([]);
@@ -255,9 +293,12 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
         );
 
         const outbound = yield* Queue.take(output);
-        const decoded = JSON.parse(
+        const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(
           typeof outbound === "string" ? outbound : new TextDecoder().decode(outbound),
-        ) as { id: unknown; result: unknown };
+        );
+        const decoded = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({ id: Schema.Unknown, result: Schema.Unknown }),
+        )(parsed);
         assert.equal(decoded.id, "omp-1");
         // oh-my-pi's MCP dialect expects a flat action string plus content, not the
         // ACP-schema nested action object.
