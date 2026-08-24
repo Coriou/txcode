@@ -639,7 +639,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       }),
       {
         onExpectedFailure: setStreamError,
-        retryExpectedFailureAfter: "250 millis",
         resubscribe: foregroundResubscriptions,
         terminalFailure: {
           matches: wasSubscribeThreadNotFound,

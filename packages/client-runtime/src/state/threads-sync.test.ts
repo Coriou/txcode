@@ -133,6 +133,7 @@ function awaitThreadState(
 const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (options?: {
   readonly cached?: OrchestrationThread;
   readonly httpSnapshot?: Option.Option<OrchestrationThreadDetailSnapshot>;
+  readonly httpUnavailableFirst?: number;
   readonly completionMarker?: boolean;
 }) {
   const inputs = yield* Queue.unbounded<TestThreadInput>();
@@ -179,13 +180,23 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const prepared = yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(
     Option.some(PREPARED),
   );
+  const httpUnavailableRemaining = yield* Ref.make(options?.httpUnavailableFirst ?? 0);
+  // The knob counts a window of degraded loads. Ref.modify's function returns
+  // [value, nextState]; comparing the pre-decrement count means with N set,
+  // the first N loads return no snapshot and call N+1 succeeds.
   const snapshotLoader = ThreadSnapshotLoader.of({
     load: (_prepared, threadId) =>
       Ref.update(loaderCalls, (count) => count + 1).pipe(
-        Effect.as(
-          threadId === THREAD_ID
-            ? (options?.httpSnapshot ?? Option.none<OrchestrationThreadDetailSnapshot>())
-            : Option.none<OrchestrationThreadDetailSnapshot>(),
+        Effect.andThen(
+          Ref.modify(httpUnavailableRemaining, (n) => {
+            const next = Math.max(0, n - 1);
+            return [n, next] as const;
+          }),
+        ),
+        Effect.map((remaining) =>
+          remaining > 0 || threadId !== THREAD_ID
+            ? Option.none<OrchestrationThreadDetailSnapshot>()
+            : (options?.httpSnapshot ?? Option.none<OrchestrationThreadDetailSnapshot>()),
         ),
       ),
   });
@@ -252,8 +263,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     savedThreads,
     removedThreads,
     wakeups,
-    replaceSession: SubscriptionRef.set(
-      supervisorSession,
+    replaceSession: SubscriptionRef.update(supervisorSession, () =>
       Option.some(
         testSession(
           client,
@@ -264,10 +274,13 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   };
 });
 
-const snapshot = (thread: OrchestrationThread): OrchestrationThreadStreamItem => ({
+const snapshot = (
+  thread: OrchestrationThread,
+  snapshotSequence = 1,
+): OrchestrationThreadStreamItem => ({
   kind: "snapshot",
   snapshot: {
-    snapshotSequence: 1,
+    snapshotSequence,
     thread,
   },
 });
@@ -537,7 +550,8 @@ describe("EnvironmentThreads", () => {
       expect(Option.getOrThrow(failed.error)).toBe("thread not found yet");
       expect(yield* Ref.get(harness.subscriptionCount)).toBe(1);
 
-      yield* TestClock.adjust("250 millis");
+      // Worst-case first backoff delay is 250ms * 1.25 jitter.
+      yield* TestClock.adjust("400 millis");
       for (let attempt = 0; attempt < 100; attempt += 1) {
         if ((yield* Ref.get(harness.subscriptionCount)) >= 2) {
           break;
@@ -563,6 +577,58 @@ describe("EnvironmentThreads", () => {
       expect(Option.isNone(recovered.error)).toBe(true);
       expect(yield* Ref.get(harness.subscriptionCount)).toBe(2);
       expect(yield* Ref.get(harness.retryCount)).toBe(0);
+    }),
+  );
+
+  it.effect("survives unavailable http snapshots and converges once they clear", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        httpUnavailableFirst: 2,
+        httpSnapshot: Option.some({ snapshotSequence: 1, thread: BASE_THREAD }),
+      });
+
+      // A degraded load is not a dead fiber: the first attempt still opens
+      // the subscription (socket fallback) without surfacing a fake error.
+      for (
+        let attempt = 0;
+        attempt < 100 && (yield* Ref.get(harness.subscriptionCount)) < 1;
+        attempt += 1
+      ) {
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(1);
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(1);
+      // With N=2 the replacement session still lands inside the
+      // unavailability window and falls back to the socket once more.
+      yield* harness.replaceSession;
+      for (
+        let attempt = 0;
+        attempt < 100 && (yield* Ref.get(harness.subscriptionCount)) < 2;
+        attempt += 1
+      ) {
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(2);
+      expect(Option.isNone((yield* Ref.get(harness.latest)).data)).toBe(true);
+
+      // Once the endpoint answers again, the next session loads the
+      // authoritative snapshot on the same atom and turns live.
+      yield* harness.replaceSession;
+      let live: EnvironmentThreadState | undefined;
+      for (let i = 0; i < 500 && live === undefined; i += 1) {
+        yield* Effect.yieldNow;
+        const current = yield* Ref.get(harness.latest);
+        if (current.status === "live" && Option.isSome(current.data)) {
+          live = current;
+        }
+      }
+      if (live === undefined) {
+        throw new Error("thread never turned live after the unavailability window cleared");
+      }
+      expect(Option.getOrThrow(live.data).title).toBe(BASE_THREAD.title);
+      expect(Option.isNone(live.error)).toBe(true);
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(3);
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(3);
     }),
   );
 
@@ -738,6 +804,28 @@ describe("EnvironmentThreads", () => {
       yield* TestClock.adjust("30 seconds");
       yield* Effect.yieldNow;
       expect(yield* Ref.get(harness.subscriptionCount)).toBe(1);
+
+      // A session replacement still runs one fresh attempt against the new
+      // emission — the recovery path if the miss was spurious.
+      yield* harness.replaceSession;
+      for (
+        let attempt = 0;
+        attempt < 100 && (yield* Ref.get(harness.subscriptionCount)) < 2;
+        attempt += 1
+      ) {
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(2);
+      // The re-attempt never saw another not-found failure: deletion stays
+      // idempotent on the same atom.
+      expect(yield* Ref.get(harness.removedThreads)).toEqual([THREAD_ID]);
+      expect((yield* Ref.get(harness.latest)).status).toBe("deleted");
+
+      // No retry storm on the new session either: far past any retry delay
+      // there is still exactly one attempt per session.
+      yield* TestClock.adjust("30 seconds");
+      yield* Effect.yieldNow;
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(2);
     }),
   );
 });

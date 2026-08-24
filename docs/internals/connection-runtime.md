@@ -96,13 +96,17 @@ Finite requests, durable subscriptions, and commands are separate APIs:
 
 - Query atoms revalidate when the RPC generation changes.
 - Subscription atoms switch to replacement sessions.
-- Subscription failure handling in [rpc/client.ts][client] distinguishes two
-  cases. A transport failure (`isTransportFailure`: every failure is an RPC
-  client error) ends the inner subscription without resubscribing, so the outer
-  stream waits for the supervisor to supply a replacement session. A handled
-  domain failure runs `onExpectedFailure` and, when
-  `retryExpectedFailureAfter` is set, sleeps and resubscribes on the **same**
-  session. A healthy transport is never torn down for a domain failure.
+- Subscription failure handling in [rpc/client.ts][client] distinguishes
+  three cases. A transport failure (`isTransportFailure`: every failure is an
+  RPC client error) ends the inner subscription without resubscribing, so the
+  outer stream waits for the supervisor to supply a replacement session. A
+  terminal failure (`terminalFailure`: every failure matches a
+  caller-supplied predicate, e.g. a deleted thread) runs `handle` once and
+  ends the attempt with no retry. Any other handled domain failure runs
+  `onExpectedFailure` and resubscribes on the **same** session after capped
+  exponential backoff: 250ms doubling per attempt within the session, 8s
+  ceiling, multiplicative jitter in [1, 1.25]. A healthy transport is never
+  torn down for a domain failure.
 - Mutations resolve the current environment runtime at execution time.
 - Shell and thread snapshots are available while offline.
 - Sync status is explicit and independent per domain. Shell status is `empty`,
