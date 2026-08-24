@@ -127,6 +127,7 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
 export interface ThreadStatusPill {
   label:
     | "Working"
+    | "Reconnecting"
     | "Monitoring"
     | "Connecting"
     | "Completed"
@@ -145,6 +146,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 6,
   "Awaiting Input": 5,
   Working: 4,
+  Reconnecting: 4,
   Connecting: 4,
   "Plan Ready": 3,
   Monitoring: 2,
@@ -644,8 +646,10 @@ export function formatWorkingDurationLabel(elapsedMs: number): string {
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
+  /** False while the streams feeding this pill are detached. */
+  streamLive?: boolean;
 }): ThreadStatusPill | null {
-  const { thread } = input;
+  const { thread, streamLive = true } = input;
 
   if (thread.hasPendingApprovals) {
     return {
@@ -665,13 +669,26 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
+  // In-flight work may only read as healthy while the event stream that would
+  // deliver its completion is alive; otherwise say Reconnecting (same sky
+  // family as Connecting — degraded, not broken).
+  const workingPill = (): ThreadStatusPill =>
+    streamLive
+      ? {
+          label: "Working",
+          colorClass: "text-sky-600 dark:text-sky-300/80",
+          dotClass: "bg-sky-500 dark:bg-sky-300/80",
+          pulse: true,
+        }
+      : {
+          label: "Reconnecting",
+          colorClass: "text-sky-600 dark:text-sky-300/80",
+          dotClass: "bg-sky-500 dark:bg-sky-300/80",
+          pulse: true,
+        };
+
   if (thread.session?.status === "running") {
-    return {
-      label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
-    };
+    return workingPill();
   }
 
   if (thread.session?.status === "starting") {
@@ -704,12 +721,7 @@ export function resolveThreadStatusPill(input: {
   // loops (a parent agent babysitting a PR, tailing checks) with no other
   // live work. Same recede treatment as Working per inbox-zero.
   if (thread.backgroundLiveness === "working") {
-    return {
-      label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
-    };
+    return workingPill();
   }
 
   if (thread.backgroundLiveness === "monitoring") {

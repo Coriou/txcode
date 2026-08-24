@@ -38,3 +38,19 @@ export function threadHasOlderTurns(state: EnvironmentThreadState): boolean {
     onSome: (page) => page.hasMore,
   });
 }
+
+export type EnvironmentThreadStreamHealth = "live" | "connecting" | "detached" | "deleted";
+
+/**
+ * Whether turn activity may render as healthy live work: "Working" may only
+ * render while the detail stream that would deliver the turn completion is
+ * alive. Pure and dependency-free so the web and mobile clients can share it.
+ */
+export function environmentThreadStreamHealth(
+  state: EnvironmentThreadState,
+): EnvironmentThreadStreamHealth {
+  if (state.status === "deleted") return "deleted";
+  if (Option.isSome(state.error)) return "detached";
+  if (state.status === "live") return "live";
+  return "connecting";
+}

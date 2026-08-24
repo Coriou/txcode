@@ -1125,6 +1125,45 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Working", pulse: true });
   });
 
+  it("shows Reconnecting instead of Working when the shell stream is detached", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: baseThread,
+        streamLive: false,
+      }),
+    ).toMatchObject({ label: "Reconnecting", pulse: true });
+  });
+
+  it("shows Reconnecting for detached background liveness too, not only running sessions", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, session: null, backgroundLiveness: "working" },
+        streamLive: false,
+      }),
+    ).toMatchObject({ label: "Reconnecting", pulse: true });
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, session: null, backgroundLiveness: "working" },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("keeps Working when the shell stream is live (default)", () => {
+    expect(resolveThreadStatusPill({ thread: baseThread })).toMatchObject({
+      label: "Working",
+      pulse: true,
+    });
+  });
+
+  it("does not detach non-working pills", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...baseThread, hasPendingApprovals: true },
+        streamLive: false,
+      }),
+    ).toMatchObject({ label: "Pending Approval" });
+  });
+
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
     expect(
       resolveThreadStatusPill({

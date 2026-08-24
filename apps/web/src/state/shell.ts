@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import {
   AVAILABLE_CONNECTION_STATE,
   connectionProjectionPhase,
@@ -7,7 +8,9 @@ import {
   createEnvironmentShellSummaryAtom,
   createEnvironmentSnapshotAtom,
   createShellEnvironmentAtoms,
+  shellStreamIsLive,
 } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -46,3 +49,9 @@ export const allEnvironmentShellsBootstrappedAtom = Atom.make((get) => {
   }
   return true;
 }).pipe(Atom.withLabel("web-all-environment-shells-bootstrapped"));
+
+/** Whether the environment's shell event stream is established (drives Reconnecting pills). */
+export function useShellStreamLive(environmentId: EnvironmentId): boolean {
+  const state = useAtomValue(environmentShell.stateValueAtom(environmentId));
+  return shellStreamIsLive(state);
+}

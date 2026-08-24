@@ -35,11 +35,16 @@ export interface EnvironmentShellState {
   readonly error: Option.Option<string>;
 }
 
-const EMPTY_SHELL_STATE: EnvironmentShellState = {
+export const EMPTY_SHELL_STATE: EnvironmentShellState = {
   snapshot: Option.none(),
   status: "empty",
   error: Option.none(),
 };
+
+/** Whether the shell event stream is established: sidebar liveness presentations gate on this. */
+export function shellStreamIsLive(state: EnvironmentShellState): boolean {
+  return state.status === "live";
+}
 
 function shellStatusForSnapshot(
   snapshot: Option.Option<OrchestrationShellSnapshot>,

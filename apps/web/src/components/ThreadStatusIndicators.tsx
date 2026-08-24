@@ -11,6 +11,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
+import { useShellStreamLive } from "../state/shell";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
 import { useUiStateStore } from "../uiStateStore";
@@ -430,11 +431,13 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     gitStatus: gitStatus.data,
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+  const shellStreamLive = useShellStreamLive(thread.environmentId);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
       lastVisitedAt,
     },
+    streamLive: shellStreamLive,
   });
 
   if (!prStatus && !threadStatus) {

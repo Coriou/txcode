@@ -651,6 +651,20 @@ describe("MessagesTimeline", () => {
     ).not.toContain('data-maintain-scroll-at-end="enabled"');
   });
 
+  it("renders Reconnecting instead of Working while the detail stream is detached", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        streamDetached
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        timelineEntries={[]}
+      />,
+    );
+    expect(markup).toContain("Reconnecting");
+    expect(markup).not.toContain("Working for");
+  });
+
   it("renders collapse controls for long user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

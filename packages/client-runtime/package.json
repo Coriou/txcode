@@ -123,6 +123,10 @@
       "types": "./src/state/shell.ts",
       "default": "./src/state/shell.ts"
     },
+    "./state/threadState": {
+      "types": "./src/state/threadState.ts",
+      "default": "./src/state/threadState.ts"
+    },
     "./state/threadNotifications": {
       "types": "./src/state/threadNotifications.ts",
       "default": "./src/state/threadNotifications.ts"

@@ -39,6 +39,7 @@ import {
   submitCodexFeedback,
   type CodexFeedbackSubmission,
 } from "@t3tools/client-runtime/state/threads";
+import { environmentThreadStreamHealth } from "@t3tools/client-runtime/state/threadState";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
@@ -2295,6 +2296,13 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
+  // A running turn may only read as live work while the stream that would deliver
+  // the completion is attached; deleted navigates away via the route effect.
+  // Cold opens flash Reconnecting until first attach — honest (nothing can
+  // deliver yet), one-shot, and preferred over a falsely ticking timer.
+  const threadStreamHealth = environmentThreadStreamHealth(routeThreadState);
+  const streamDetachedWhileWorking =
+    threadStreamHealth !== "live" && threadStreamHealth !== "deleted";
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
@@ -6698,6 +6706,7 @@ function ChatViewContent(props: ChatViewProps) {
                 key={activeThread.id}
                 isWorking={isWorking}
                 workingStepLabel={workingStepLabel}
+                streamDetached={phase === "running" && streamDetachedWhileWorking}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
