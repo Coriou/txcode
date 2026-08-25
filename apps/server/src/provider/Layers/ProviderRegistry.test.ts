@@ -1660,7 +1660,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       );
 
       it.effect(
-        "keeps cursor disabled and skips probing when the provider setting is disabled",
+        "keeps Cursor disabled and skips provider probing when settings use their defaults",
         () =>
           Effect.gen(function* () {
             const serverSettings = yield* makeMutableServerSettingsService(
@@ -1668,9 +1668,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 deepMerge(encodedDefaultServerSettings, {
                   providers: {
                     codex: {
-                      enabled: false,
-                    },
-                    cursor: {
                       enabled: false,
                     },
                     grok: {
@@ -2156,6 +2153,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
           assert.deepStrictEqual(status.slashCommands, [
             {
+              name: "compact",
+              description: "Summarize the conversation and reduce context usage",
+            },
+            {
               name: "review",
               description: "Review a pull request",
               input: { hint: "pr-or-branch" },
@@ -2198,6 +2199,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           );
 
           assert.deepStrictEqual(status.slashCommands, [
+            {
+              name: "compact",
+              description: "Summarize the conversation and reduce context usage",
+            },
             {
               name: "ui",
               description: "Explore and refine UI",

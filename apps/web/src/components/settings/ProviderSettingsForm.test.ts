@@ -37,6 +37,18 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("shows the auto-compaction threshold for Claude providers", () => {
+    const claude = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("claudeAgent")];
+    expect(claude).toBeDefined();
+
+    expect(deriveProviderSettingsFields(claude!).map((field) => field.key)).toEqual([
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "launchArgs",
+    ]);
+  });
+
   it("exposes the OMP binary and launch argument fields", () => {
     const omp = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("omp")];
     expect(omp).toBeDefined();
