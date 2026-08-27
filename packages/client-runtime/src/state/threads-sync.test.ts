@@ -721,6 +721,7 @@ describe("EnvironmentThreads", () => {
         new OrchestrationGetSnapshotError({
           message: `Thread ${THREAD_ID} was not found`,
           cause: THREAD_ID,
+          threadDisposition: "not-found",
         }),
       );
 

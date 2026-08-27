@@ -1527,6 +1527,7 @@ const makeWsRpcLayer = (
                 return yield* new OrchestrationGetSnapshotError({
                   message: `Thread ${input.threadId} was not found`,
                   cause: input.threadId,
+                  threadDisposition: "not-found",
                 });
               }
 

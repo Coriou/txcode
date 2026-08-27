@@ -13,16 +13,17 @@ describe("wasSubscribeThreadNotFound", () => {
         new OrchestrationGetSnapshotError({
           message: "Thread thread-1 was not found",
           cause: "thread-1",
+          threadDisposition: "not-found",
         }),
       ),
     ).toBe(true);
   });
 
-  it("rejects messages with trailing content", () => {
+  it("rejects a missing disposition", () => {
     expect(
       wasSubscribeThreadNotFound(
         new OrchestrationGetSnapshotError({
-          message: "Thread thread-1 was not found (will retry)",
+          message: "Thread thread-1 was not found",
           cause: "thread-1",
         }),
       ),

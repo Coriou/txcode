@@ -14,9 +14,7 @@ export function wasBootstrapThreadDeleted(error: unknown): boolean {
 
 const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
 
-/** Server wording for a subscribeThread miss (`apps/server/src/ws.ts`: `Thread ${threadId} was not found`). */
-const THREAD_NOT_FOUND_MESSAGE = /^Thread .+ was not found$/;
-
+/** Set by the server when a subscribeThread miss has no snapshot (`apps/server/src/ws.ts`). */
 export function wasSubscribeThreadNotFound(error: unknown): boolean {
-  return isOrchestrationGetSnapshotError(error) && THREAD_NOT_FOUND_MESSAGE.test(error.message);
+  return isOrchestrationGetSnapshotError(error) && error.threadDisposition === "not-found";
 }
