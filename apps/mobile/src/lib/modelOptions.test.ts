@@ -41,7 +41,7 @@ describe("mobile model options", () => {
         label: "Kimi K2.6",
         providerLabel: "Oh My Pi",
         subProvider: "Moonshot",
-        subtitle: "Oh My Pi · Moonshot",
+        subtitle: "Moonshot",
       },
     ]);
   });
