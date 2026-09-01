@@ -1,10 +1,12 @@
 import {
   EnvironmentAuthorizationError,
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   AuthTerminalOperateScope,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotError,
   type RelayClientInstallProgressEvent,
+  type ServerConfigStreamEvent,
   WS_METHODS,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -60,6 +62,7 @@ function session(client: WsRpcProtocolClient): RpcSession.RpcSession {
   return {
     client,
     initialConfig: Effect.never,
+    subscribeServerConfig: (input) => client.subscribeServerConfig(input),
     ready: Effect.void,
     probe: Effect.void,
     closed: Effect.never,
@@ -90,6 +93,39 @@ const makeHarness = Effect.fn("TestEnvironmentRpc.makeHarness")(function* () {
 });
 
 describe("environment RPC", () => {
+  it.effect("reuses the session config stream instead of opening a duplicate subscription", () =>
+    Effect.gen(function* () {
+      const event: ServerConfigStreamEvent = {
+        version: 1,
+        type: "settingsUpdated",
+        payload: { settings: DEFAULT_SERVER_SETTINGS },
+      };
+      let duplicateSubscriptions = 0;
+      const client = {
+        [WS_METHODS.subscribeServerConfig]: () => {
+          duplicateSubscriptions += 1;
+          return Stream.never;
+        },
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+      yield* SubscriptionRef.set(
+        activeSession,
+        Option.some({
+          ...session(client),
+          subscribeServerConfig: () => Stream.succeed(event),
+        }),
+      );
+
+      const received = yield* subscribe(WS_METHODS.subscribeServerConfig, {}).pipe(
+        Stream.runHead,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+      );
+
+      expect(received).toEqual(Option.some(event));
+      expect(duplicateSubscriptions).toBe(0);
+    }),
+  );
+
   it.effect("observes unary requests until they complete", () =>
     Effect.gen(function* () {
       const observations: string[] = [];
