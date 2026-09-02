@@ -11,6 +11,7 @@ import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-ro
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -67,7 +68,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <SidebarBrand onBackdrop={backdropVariant !== null} />
       {pillLabel ? (
         <Badge
-          className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground"
+          className="relative z-10 ml-1 hidden rounded-full px-1.5 text-muted-foreground @[15rem]/sidebar-header:inline-flex"
           data-environment-identification="pill"
           size="sm"
           variant="secondary"
@@ -89,7 +90,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <T3Wordmark />
+      <T3Wordmark aria-label="T3" className="h-2.5 w-auto shrink-0" />
       <span
         className={cn(
           "truncate text-sm font-medium tracking-tight",
@@ -102,21 +103,6 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-function T3Wordmark() {
-  return (
-    <svg
-      aria-label="Tx"
-      className="h-2.5 w-auto shrink-0"
-      viewBox="15.5309 37 94.3941 56"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM65.925 51H81.565L109.925 93H94.285ZM65.925 93L94.285 51H109.925L81.565 93Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
 
 function SidebarUtilityItem({
   icon,

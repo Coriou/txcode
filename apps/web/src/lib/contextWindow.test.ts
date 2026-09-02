@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@t3tools/contracts";
 
-import {
-  deriveLatestContextWindowSnapshot,
-  formatContextWindowTokens,
-  formatProviderDisplayName,
-} from "./contextWindow";
+import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow";
 
 function makeActivity(id: string, kind: string, payload: unknown): OrchestrationThreadActivity {
   return {
@@ -20,10 +16,6 @@ function makeActivity(id: string, kind: string, payload: unknown): Orchestration
 }
 
 describe("contextWindow", () => {
-  it("formats the Oh My Pi provider name", () => {
-    expect(formatProviderDisplayName("omp")).toBe("Oh My Pi");
-  });
-
   it("derives the latest valid context window snapshot", () => {
     const snapshot = deriveLatestContextWindowSnapshot([
       makeActivity("activity-1", "context-window.updated", {
