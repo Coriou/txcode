@@ -74,7 +74,7 @@ export function formatServiceStatus(
     compareExactServiceVersions(status.installedVersion, cliVersion) > 0
   ) {
     return [
-      "T3 Code service",
+      "Tx Code service",
       `  Status: installed · t3@${installedVersion} (newer than this t3@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
