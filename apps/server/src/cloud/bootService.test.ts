@@ -139,7 +139,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       timeouts.set(command, input.timeout);
       if (
         control.stateAfterStop !== undefined &&
-        (command === "systemctl --user stop t3code.service" ||
+        (command === "systemctl --user stop txcode.service" ||
           command.startsWith("launchctl bootout --wait "))
       ) {
         yield* fs.writeFileString(statePath, control.stateAfterStop).pipe(Effect.orDie);
@@ -291,9 +291,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           ),
         ).toEqual(
           platform === "linux"
-            ? ["systemctl --user stop t3code.service", "systemctl --user restart t3code.service"]
+            ? ["systemctl --user stop txcode.service", "systemctl --user restart txcode.service"]
             : [
-                "launchctl bootout --wait gui/501/com.t3tools.t3code.service",
+                "launchctl bootout --wait gui/501/net.coriou.txcode.service",
                 `launchctl bootstrap gui/501 ${plan.unitPath}`,
               ],
         );
