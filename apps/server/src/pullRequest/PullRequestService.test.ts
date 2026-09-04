@@ -1,7 +1,10 @@
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type {
   OrchestrationProjectShell,
@@ -1000,6 +1003,41 @@ it.effect("refuses an action the host never claimed it could run", () =>
     assert.strictEqual(error._tag, "PullRequestOperationError");
     assert.isFalse(ran);
   }),
+);
+
+it.effect("publishes a successful merge for immediate settlement", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const mergedAt = "2026-09-03T02:00:00.000Z";
+      const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            runAction: () => TestClock.setTime(Date.parse(mergedAt)),
+          }),
+        ],
+      });
+      const merges = yield* service.subscribeMerges;
+      const observedMerge = yield* Stream.runHead(merges).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      yield* service.runAction({
+        ...reference,
+        repository: " ACME/WEB ",
+        action: "merge",
+        mergeMethod: "merge",
+      });
+
+      assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(observedMerge)), {
+        ...reference,
+        mergedAt,
+      });
+    }),
+  ),
 );
 
 it.effect("refuses an action this viewer may not take, and says what access it takes", () =>
@@ -2608,10 +2646,11 @@ it.effect("a listing narrowed to some projects is its own cache entry", () =>
   }),
 );
 
-it.effect("an explicit invalidation makes the next listing ask the host again", () =>
+it.effect("explicit and turn invalidations make the next listing ask the host again", () =>
   Effect.gen(function* () {
     let hostCalls = 0;
     let viewerCalls = 0;
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
       providers: [
@@ -2635,11 +2674,14 @@ it.effect("an explicit invalidation makes the next listing ask the host again", 
     assert.strictEqual(viewerCalls, 2);
 
     // Forgetting one change request leaves the listings shared.
-    yield* service.invalidate({
-      reference: { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 },
-    });
+    yield* service.invalidate({ reference });
     yield* service.list({ state: "open" });
     assert.strictEqual(hostCalls, 2);
+    yield* service.refreshAfterTurn;
+    const refresh = Option.getOrThrow(yield* Stream.runHead(service.subscribeRefreshes));
+    yield* service.list({ state: "open" });
+    assert.isAbove(refresh, 0);
+    assert.strictEqual(hostCalls, 3);
   }),
 );
 
@@ -3189,6 +3231,32 @@ it.effect("does not ask the host again for a linked summary it already holds", (
     const second = yield* service.summary(reference);
     assert.strictEqual(second.title, "Change request 1");
     assert.strictEqual(calls, 1);
+  }),
+);
+
+it.effect("reuses an observed merged state for strict settlement reads", () =>
+  Effect.gen(function* () {
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () =>
+            Effect.succeed({
+              ...hostedChangeRequest("merged body", 4),
+              state: "merged",
+              updatedAt: "2026-07-03T00:00:00Z",
+            }),
+          getChangeRequestSummary: () => Effect.die("strict merged state must not refresh"),
+        }),
+      ],
+    });
+
+    yield* service.detail(reference);
+
+    const summary = yield* service.summary(reference, { recoverTransientFailure: false });
+    assert.strictEqual(summary.state, "merged");
+    assert.strictEqual(summary.updatedAt, "2026-07-03T00:00:00Z");
   }),
 );
 
@@ -3836,7 +3904,7 @@ it.effect("refuses a remark rewritten into nothing but whitespace", () =>
   }),
 );
 
-it.effect("forgets the cached detail after a rewrite, like the other mutations", () =>
+it.effect("forgets the cached detail after a rewrite or terminal turn", () =>
   Effect.gen(function* () {
     let coreCalls = 0;
     const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
@@ -3871,8 +3939,11 @@ it.effect("forgets the cached detail after a rewrite, like the other mutations",
     yield* service.detail(reference);
     yield* service.update({ ...reference, title: "Renamed" });
     yield* service.detail(reference);
-
     assert.strictEqual(coreCalls, 2);
+
+    yield* service.refreshAfterTurn;
+    yield* service.detail(reference);
+    assert.strictEqual(coreCalls, 3);
   }),
 );
 
