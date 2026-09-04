@@ -431,15 +431,13 @@ describe("AcpRuntimeModel", () => {
     expect(commandsResult.events).toEqual([
       {
         _tag: "AvailableCommandsUpdated",
-        payload: {
-          availableCommands: [
-            {
-              name: "review",
-              description: "Review the current changes",
-              input: { hint: "optional focus" },
-            },
-          ],
-        },
+        availableCommands: [
+          {
+            name: "review",
+            description: "Review the current changes",
+            input: { hint: "optional focus" },
+          },
+        ],
         rawPayload: {
           sessionId: "session-1",
           update: {
@@ -453,6 +451,10 @@ describe("AcpRuntimeModel", () => {
             ],
           },
         },
+      },
+    ]);
+  });
+
   it("keeps thought chunks separate from assistant text", () => {
     const notification = {
       sessionId: "session-1",

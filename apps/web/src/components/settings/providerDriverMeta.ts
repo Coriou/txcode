@@ -83,6 +83,8 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Oh My Pi",
     icon: OmpIcon,
     settingsSchema: OmpSettings,
+  },
+  {
     value: ProviderDriverKind.make("antigravity"),
     label: "Antigravity",
     icon: AntigravityIcon,

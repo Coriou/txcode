@@ -40,7 +40,7 @@ export type BuiltInDriversEnv =
   | CursorDriverEnv
   | GrokDriverEnv
   | OpenCodeDriverEnv
-  | OmpDriverEnv;
+  | OmpDriverEnv
   | AntigravityDriverEnv;
 
 /**

@@ -18,7 +18,6 @@ import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
-import { linkedPullRequestDetailAtom } from "../state/pullRequests";
 import { useShellStreamLive } from "../state/shell";
 import { linkedPullRequestDetailAtom, useSharedPullRequestSummary } from "../state/pullRequests";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";

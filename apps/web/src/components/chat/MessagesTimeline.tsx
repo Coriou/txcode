@@ -699,7 +699,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurnId: latestTurn?.turnId ?? null,
       streamDetached,
     }),
-    [isCompacting, isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId, streamDetached],
+    [
+      isCompacting,
+      isRevertingCheckpoint,
+      isWorking,
+      isPreparingWorktree,
+      latestTurn?.turnId,
+      streamDetached,
+    ],
   );
   // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
@@ -1610,8 +1617,7 @@ function ProposedPlanTimelineRow({
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree, streamDetached } =
-    use(TimelineRowActivityCtx);
+  const { isCompacting, isPreparingWorktree, streamDetached } = use(TimelineRowActivityCtx);
   return (
     <div className="border-b border-border/60 pb-2 pt-1">
       <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
@@ -1632,7 +1638,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
               <ActivityShimmerOverlay>
                 <CompactingLabel />
               </ActivityShimmerOverlay>
-            <>
+            </>
           ) : row.createdAt ? (
             <>
               Working for <WorkingTimer createdAt={row.createdAt} />

@@ -23,7 +23,6 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
-  configOptionCurrentValueMatches,
   collectSessionConfigOptionValues,
   decideToolCallUpdateEmission,
   extractModelConfigId,
