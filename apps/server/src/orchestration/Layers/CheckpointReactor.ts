@@ -21,7 +21,7 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
-import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
+import { parseTurnDiffFilesFromNumstat } from "../../checkpointing/Diffs.ts";
 import {
   checkpointRefForThreadTurn,
   resolveThreadWorkspaceCwd,
@@ -35,7 +35,6 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
-import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
@@ -181,8 +180,6 @@ const make = Effect.gen(function* () {
     return project ? [project] : [];
   });
 
-  const isGitWorkspace = (cwd: string) => isGitRepository(cwd);
-
   // Resolves the workspace CWD for checkpoint operations, preferring the
   // active provider session CWD and falling back to the thread/project config.
   // Returns undefined when no CWD can be determined or the workspace is not
@@ -192,7 +189,7 @@ const make = Effect.gen(function* () {
     readonly thread: { readonly projectId: ProjectId; readonly worktreePath: string | null };
     readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly workspaceRoot: string }>;
     readonly preferSessionRuntime: boolean;
-  }): Effect.fn.Return<string | undefined> {
+  }): Effect.fn.Return<string | undefined, CheckpointStoreError> {
     const fromSession = yield* resolveSessionRuntimeForThread(input.threadId);
     const fromThread = resolveThreadWorkspaceCwd({
       thread: input.thread,
@@ -213,7 +210,7 @@ const make = Effect.gen(function* () {
     if (!cwd) {
       return undefined;
     }
-    if (!isGitWorkspace(cwd)) {
+    if (!(yield* checkpointStore.isGitRepository(cwd))) {
       return undefined;
     }
     return cwd;
@@ -270,10 +267,11 @@ const make = Effect.gen(function* () {
         toCheckpointRef: targetCheckpointRef,
         fallbackFromToHead: false,
         ignoreWhitespace: false,
+        format: "numstat",
       })
       .pipe(
         Effect.map((diff) =>
-          parseTurnDiffFilesFromUnifiedDiff(diff).map((file) => ({
+          parseTurnDiffFilesFromNumstat(diff).map((file) => ({
             path: file.path,
             kind: "modified" as const,
             additions: file.additions,
@@ -750,7 +748,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
-    if (!isGitWorkspace(sessionRuntime.value.cwd)) {
+    if (!(yield* checkpointStore.isGitRepository(sessionRuntime.value.cwd))) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,

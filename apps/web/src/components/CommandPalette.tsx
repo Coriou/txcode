@@ -30,6 +30,7 @@ import {
 import {
   type DesktopWslState,
   type EnvironmentId,
+  type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
   type SourceControlDiscoveryResult,
@@ -247,6 +248,7 @@ function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
 interface AddProjectEnvironmentOption {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  readonly machine: EnvironmentMachineKind;
   readonly isPrimary: boolean;
   readonly isConnected: boolean;
   readonly status: string;
@@ -547,7 +549,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(open);
         }}
       >
-        {children}
+        {/* Block background focus calls for the entire time the palette is open. */}
+        <div className="contents" inert={state.open}>
+          {children}
+        </div>
         <CommandPaletteDialog
           mode={state.mode}
           openIntent={state.openIntent}
@@ -874,6 +879,7 @@ function OpenCommandPaletteDialog(props: {
           runtimeLabel: environment.label,
         }),
         isPrimary,
+        machine: resolveEnvironmentMachineKind(environment.serverConfig),
         isConnected: canCreateProjectInEnvironment(environment.connection.phase),
         status: connectionStatusText(environment.connection),
       };
@@ -1536,7 +1542,7 @@ function OpenCommandPaletteDialog(props: {
           : option.environmentId
         : option.status,
       disabled: !option.isConnected,
-      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      icon: <EnvironmentMachineIcon kind={option.machine} className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
         startAddProjectSourceSelection(option.environmentId);
@@ -2344,15 +2350,15 @@ function OpenCommandPaletteDialog(props: {
       context: { modelPickerOpen: false },
     });
     if (threadJumpIndexFromCommand(command ?? "") !== null) {
+      event.preventDefault();
+      event.stopPropagation();
       const matchingItem = displayedGroups
         .flatMap((group) => group.items)
         .find((item) => item.shortcutCommand === command);
       if (matchingItem) {
-        event.preventDefault();
-        event.stopPropagation();
         executeItem(matchingItem);
-        return;
       }
+      return;
     }
     if (command === "thread.copyReference" && activeThreadReferenceCopyTarget !== null) {
       event.preventDefault();
