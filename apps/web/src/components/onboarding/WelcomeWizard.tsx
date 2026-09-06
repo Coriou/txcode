@@ -490,7 +490,7 @@ function ConnectMachinesStep({
             <CollapsiblePanel>
               <CommandBlock command={CONNECT_LOGIN_COMMAND} className="mt-2" />
               <p className="mt-2 text-xs text-muted-foreground">
-                Keep T3 Code running on that computer. If it is not running, open T3 Code or run{" "}
+                Keep Tx Code running on that computer. If it is not running, open Tx Code or run{" "}
                 <code className="font-mono">npx t3 serve</code>.
               </p>
             </CollapsiblePanel>
@@ -503,7 +503,7 @@ function ConnectMachinesStep({
         <>
           <CommandBlock command={CONNECT_LOGIN_COMMAND} className="mt-7" prominent />
           <p className="mt-2 text-xs text-muted-foreground">
-            Keep T3 Code running on that computer. If it is not running, open T3 Code or run{" "}
+            Keep Tx Code running on that computer. If it is not running, open Tx Code or run{" "}
             <code className="font-mono">npx t3 serve</code>.
           </p>
           <div className="mt-5 overflow-hidden border-y border-border">
