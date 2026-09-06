@@ -60,6 +60,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconPicker } from "./EnvironmentIconPicker";
+import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
 import {
@@ -394,7 +395,7 @@ function formatDesktopSshConnectionError(error: unknown): string {
   return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
-const ENDPOINT_ROW_CLASSNAME = "rounded-xl px-3 py-2.5 sm:px-4";
+const ENDPOINT_ROW_CLASSNAME = "first:rounded-t-xl last:rounded-b-xl px-3 py-2.5 sm:px-4";
 
 type AccessSectionPresentation = "current" | "endpoint-rail";
 
@@ -404,7 +405,10 @@ function accessRowClassName(_presentation: AccessSectionPresentation) {
 
 function endpointRowClassName(presentation: AccessSectionPresentation, isAvailable: boolean) {
   if (presentation === "endpoint-rail") {
-    return cn("relative rounded-xl px-3 py-3 sm:px-4", !isAvailable && "bg-muted/15");
+    return cn(
+      "relative first:rounded-t-xl last:rounded-b-xl px-3 py-3 sm:px-4",
+      !isAvailable && "bg-muted/15",
+    );
   }
 
   return cn(ENDPOINT_ROW_CLASSNAME, !isAvailable && "bg-muted/24");
@@ -2996,7 +3000,7 @@ export function ConnectionsSettings() {
         {desktopWslState.enabled ? (
           <SettingsRow
             title="WSL only"
-            description="Run only the WSL backend. T3 Code restarts when this changes."
+            description="Run only the WSL backend. Tx Code restarts when this changes."
             className="bg-muted/20 pl-7 sm:pl-8"
             control={
               <Switch
@@ -3222,6 +3226,7 @@ export function ConnectionsSettings() {
             >
               <ScrollArea
                 scrollFade
+                chainVerticalScroll
                 className="max-h-[22.5rem]"
                 data-testid="authorized-clients-scroll-area"
               >
@@ -3248,8 +3253,8 @@ export function ConnectionsSettings() {
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? "T3 Code will restart to expose this environment over the network."
-                    : "T3 Code will restart and limit this environment back to this machine."}
+                    ? "Tx Code will restart to expose this environment over the network."
+                    : "Tx Code will restart and limit this environment back to this machine."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -3307,15 +3312,15 @@ export function ConnectionsSettings() {
                 <AlertDialogDescription>
                   {pendingWslChange?.kind === "disable"
                     ? pendingWslChange.wasWslOnly
-                      ? "T3 Code will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
-                      : "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in T3 Code until you re-enable WSL."
+                      ? "Tx Code will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
+                      : "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in Tx Code until you re-enable WSL."
                     : pendingWslChange?.kind === "distro"
-                      ? "T3 Code will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
+                      ? "Tx Code will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
                       : pendingWslChange?.kind === "enable"
                         ? "Run the WSL backend alongside the Windows one, or stop the Windows backend and use only WSL? You can change this later from Settings."
                         : pendingWslChange?.nextValue
-                          ? "T3 Code will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again."
-                          : "T3 Code will restart and bring the Windows backend back up alongside WSL."}
+                          ? "Tx Code will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again."
+                          : "Tx Code will restart and bring the Windows backend back up alongside WSL."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -3401,7 +3406,7 @@ export function ConnectionsSettings() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  T3 Code will restart the local backend without Tailscale Serve.
+                  Tx Code will restart the local backend without Tailscale Serve.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -3439,7 +3444,7 @@ export function ConnectionsSettings() {
               <DialogHeader>
                 <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
                 <DialogDescription>
-                  T3 Code will restart the local backend with Tailscale Serve enabled and ask
+                  Tx Code will restart the local backend with Tailscale Serve enabled and ask
                   Tailscale to proxy HTTPS traffic to this backend.
                 </DialogDescription>
               </DialogHeader>
@@ -3591,6 +3596,7 @@ export function ConnectionsSettings() {
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <LoadBalancingSettings environments={environments} />
     </SettingsPageContainer>
   );
 }

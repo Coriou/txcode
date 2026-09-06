@@ -434,7 +434,7 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
       const elicitations = yield* Ref.make<Array<unknown>>([]);
       const { stdio, input, output } = yield* makeInMemoryStdio();
       const scope = yield* Scope.make();
-      const context = yield* Layer.buildWithScope(AcpClient.layer(stdio), scope);
+      const context = yield* Layer.buildWithScope(Layer.effect(AcpClient.AcpClient, AcpClient.make(stdio)), scope);
 
       yield* Effect.gen(function* () {
         const acp = yield* AcpClient.AcpClient;
@@ -529,7 +529,7 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
     Effect.gen(function* () {
       const { stdio, input, output } = yield* makeInMemoryStdio();
       const scope = yield* Scope.make();
-      const context = yield* Layer.buildWithScope(AcpClient.layer(stdio), scope);
+      const context = yield* Layer.buildWithScope(Layer.effect(AcpClient.AcpClient, AcpClient.make(stdio)), scope);
 
       yield* Effect.gen(function* () {
         const acp = yield* AcpClient.AcpClient;

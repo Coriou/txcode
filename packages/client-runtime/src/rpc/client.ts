@@ -86,7 +86,6 @@ export class EnvironmentRpcSubscriptionObserver extends Context.Reference<{
 }) {}
 
 export const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
-
 export const EXPECTED_FAILURE_RETRY_BASE_MS = 250;
 export const EXPECTED_FAILURE_RETRY_CEILING_MS = 8_000;
 const EXPECTED_FAILURE_MAX_JITTER = 0.25;
@@ -190,10 +189,13 @@ export function runStream<TTag extends EnvironmentStreamCommandRpcTag>(
 }
 
 interface SubscriptionOptions<TTag extends EnvironmentSubscriptionRpcTag> {
+  /** Reports protocol or programming defects without changing their recovery policy. */
+  readonly onDefect?: (
+    cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
+  ) => Effect.Effect<void, never, never>;
   readonly onExpectedFailure?: (
     cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
   ) => Effect.Effect<void, never, never>;
-  readonly resubscribe?: Stream.Stream<unknown, never, never>;
   /**
    * Classifies an all-Fail cause as terminal: the attempt ends for this
    * session with no retry, after `handle` runs. Checked after transport
@@ -206,9 +208,10 @@ interface SubscriptionOptions<TTag extends EnvironmentSubscriptionRpcTag> {
     readonly matches: (error: EnvironmentRpcStreamFailure<TTag>) => boolean;
     readonly handle: (cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>) => Effect.Effect<void>;
   };
+  readonly resubscribe?: Stream.Stream<unknown, never, never>;
 }
 
-export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
+function subscribeDynamicMapped<TTag extends EnvironmentSubscriptionRpcTag, A>(
   tag: TTag,
   // Input construction may fail with the method's own error domain: those
   // Fail reasons join the stream's resilience envelope instead of killing
@@ -216,12 +219,12 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
   makeInput: (
     session: RpcSession,
   ) => Effect.Effect<EnvironmentRpcInput<TTag>, EnvironmentRpcStreamFailure<TTag>>,
+  mapStream: (
+    session: RpcSession,
+    stream: Stream.Stream<EnvironmentRpcStreamValue<TTag>, EnvironmentRpcStreamFailure<TTag>>,
+  ) => Stream.Stream<A, EnvironmentRpcStreamFailure<TTag>>,
   options?: SubscriptionOptions<TTag>,
-): Stream.Stream<
-  EnvironmentRpcStreamValue<TTag>,
-  EnvironmentRpcStreamFailure<TTag>,
-  EnvironmentSupervisor
-> {
+): Stream.Stream<A, EnvironmentRpcStreamFailure<TTag>, EnvironmentSupervisor> {
   return Stream.unwrap(
     Effect.gen(function* () {
       const supervisor = yield* EnvironmentSupervisor;
@@ -253,10 +256,7 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
               >;
               const attempt = (
                 attemptIndex: number,
-              ): Stream.Stream<
-                EnvironmentRpcStreamValue<TTag>,
-                EnvironmentRpcStreamFailure<TTag>
-              > =>
+              ): Stream.Stream<A, EnvironmentRpcStreamFailure<TTag>> =>
                 Stream.suspend(() =>
                   Stream.unwrap(
                     Effect.gen(function* () {
@@ -266,10 +266,24 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
                         method: tag,
                         input,
                       });
-                      return method(input).pipe(Stream.ensuring(completeObservation));
+                      return mapStream(session, method(input)).pipe(
+                        Stream.ensuring(completeObservation),
+                      );
                     }),
                   ),
                 ).pipe(
+                  Stream.tapCause((cause) =>
+                    options?.onDefect !== undefined &&
+                    cause.reasons.some(
+                      (reason) =>
+                        reason._tag === "Die" ||
+                        (reason._tag === "Fail" &&
+                          isRpcClientError(reason.error) &&
+                          reason.error.reason._tag === "RpcClientDefect"),
+                    )
+                      ? options.onDefect(cause)
+                      : Effect.void,
+                  ),
                   Stream.catchCause((cause) => {
                     const failErrors = cause.reasons.flatMap((reason) =>
                       reason._tag === "Fail" ? [reason.error] : [],
@@ -329,6 +343,40 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
   );
 }
 
+export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
+  tag: TTag,
+  makeInput: (
+    session: RpcSession,
+  ) => Effect.Effect<EnvironmentRpcInput<TTag>, EnvironmentRpcStreamFailure<TTag>>,
+  options?: SubscriptionOptions<TTag>,
+): Stream.Stream<
+  EnvironmentRpcStreamValue<TTag>,
+  EnvironmentRpcStreamFailure<TTag>,
+  EnvironmentSupervisor
+> {
+  return subscribeDynamicMapped(tag, makeInput, (_session, stream) => stream, options);
+}
+
+/** Tags each value before `switchMap` can buffer it across a session change. */
+export function subscribeDynamicWithSession<TTag extends EnvironmentSubscriptionRpcTag>(
+  tag: TTag,
+  makeInput: (
+    session: RpcSession,
+  ) => Effect.Effect<EnvironmentRpcInput<TTag>, EnvironmentRpcStreamFailure<TTag>>,
+  options?: SubscriptionOptions<TTag>,
+): Stream.Stream<
+  readonly [session: RpcSession, value: EnvironmentRpcStreamValue<TTag>],
+  EnvironmentRpcStreamFailure<TTag>,
+  EnvironmentSupervisor
+> {
+  return subscribeDynamicMapped(
+    tag,
+    makeInput,
+    (session, stream) => stream.pipe(Stream.map((value) => [session, value] as const)),
+    options,
+  );
+}
+
 export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
   tag: TTag,
   input: EnvironmentRpcInput<TTag>,
@@ -340,8 +388,3 @@ export function subscribe<TTag extends EnvironmentSubscriptionRpcTag>(
 > {
   return subscribeDynamic(tag, () => Effect.succeed(input), options);
 }
-
-export const config = Effect.gen(function* () {
-  const session = yield* currentSession();
-  return yield* session.initialConfig;
-}).pipe(Effect.withSpan("EnvironmentRpc.config"));
