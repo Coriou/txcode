@@ -462,7 +462,8 @@ describe("createEnvironmentThreadStateAtoms", () => {
         Option.isSome(state.error),
       );
       expect(failed.error).toEqual(Option.some("thread not found yet"));
-      yield* TestClock.adjust("250 millis");
+      // Worst-case first backoff delay is 250ms * 1.25 jitter.
+      yield* TestClock.adjust("400 millis");
       const next = yield* Queue.take(h.subscriptions);
       expect(h.counts().opened).toBe(2);
       yield* Queue.offer(next.events, { kind: "snapshot", snapshot: SNAPSHOT });
