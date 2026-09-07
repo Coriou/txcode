@@ -31,6 +31,7 @@ import {
   resolveThreadListV2SwipeActions,
   type ThreadListV2Status,
 } from "./threadListV2";
+import { QueuedMessageIcon } from "./queued-message-icon";
 import { ThreadSearchMatchExcerpt } from "./thread-search-match";
 
 /**
@@ -186,12 +187,16 @@ const PENDING_TASK_MENU_ACTIONS: MenuAction[] = [
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
 ];
 
+const DRAFT_TASK_MENU_ACTIONS: MenuAction[] = [
+  { id: "delete", title: "Discard", image: "trash", attributes: { destructive: true } },
+];
+
 /**
- * A queued new task, in the same idiom as an active v2 row: it is work the
- * user wrote, so it reads like the threads it will become. "Queued" takes
- * the status slot — the state is the one thing that differs — and stays
- * uncolored because nothing is asked of the user; the environment is simply
- * not reachable yet.
+ * Unsent work, in the same idiom as an active v2 row: it is work the user
+ * wrote, so it reads like the thread it will become. The status slot says
+ * what happens next, not where the item sits: "Sends on reconnect" stays
+ * uncolored because nothing is asked of the user; "Draft" takes the amber the
+ * web sidebar uses for drafts, because this one waits on the user.
  */
 export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props: {
   readonly pendingTask: PendingNewTask;
@@ -201,7 +206,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   /** Drawn beside the label; ignored while the label is null. */
   readonly environmentMachine?: EnvironmentMachineKind;
   readonly pane?: "screen" | "sidebar";
-  /** Draws the "Pending" divider above the first queued row. */
+  /** Draws the "Unsent" divider above the first draft or queued row. */
   readonly showPendingDivider: boolean;
   /** Keeps row hairlines inside a section; section headers draw their own rule. */
   readonly showTrailingDivider?: boolean;
@@ -210,9 +215,9 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
 }) {
   const { pendingTask, onSelectPendingTask, onDeletePendingTask } = props;
   const sidebarPane = props.pane === "sidebar";
-  const projectTitle =
-    props.projectTitle ?? props.project?.title ?? pendingTask.creation.projectTitle ?? "";
-  const branch = pendingTask.creation.branch;
+  const isDraft = pendingTask.kind === "draft";
+  const projectTitle = props.projectTitle ?? props.project?.title ?? pendingTask.projectTitle ?? "";
+  const branch = pendingTask.branch;
 
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -226,7 +231,7 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
       <View className="flex-row items-center gap-1.5">
         {props.project ? (
           <ProjectFavicon
-            environmentId={pendingTask.message.environmentId}
+            environmentId={pendingTask.environmentId}
             faviconPath={props.project.faviconPath}
             size={15}
             projectTitle={projectTitle}
@@ -236,7 +241,19 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
         <Text className="flex-1 text-sm font-t3-medium text-foreground-muted" numberOfLines={1}>
           {projectTitle}
         </Text>
-        <Text className="text-xs text-foreground-tertiary">Queued</Text>
+        {isDraft ? (
+          <View className="flex-row items-center gap-1">
+            <SymbolView
+              name="square.and.pencil"
+              size={10}
+              tintColorClassName="accent-adaptive-amber-700-300"
+              type="monochrome"
+            />
+            <Text className="text-xs text-adaptive-amber-700-300">Draft</Text>
+          </View>
+        ) : (
+          <Text className="text-xs text-foreground-tertiary">Sends on reconnect</Text>
+        )}
       </View>
       {/* One line, unlike the two an active row allows: a queued title is
           derived from the whole prompt rather than written as a title, so the
@@ -272,15 +289,19 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
   return (
     <>
       {props.showPendingDivider ? (
-        <ThreadListV2SectionDivider label="Pending" pane={props.pane} />
+        <ThreadListV2SectionDivider label="Unsent" pane={props.pane} />
       ) : null}
       <ControlPillMenu
-        actions={PENDING_TASK_MENU_ACTIONS}
+        actions={isDraft ? DRAFT_TASK_MENU_ACTIONS : PENDING_TASK_MENU_ACTIONS}
         onPressAction={handleMenuAction}
         shouldOpenOnLongPress
       >
         <Pressable
-          accessibilityHint="Opens the queued task for editing"
+          accessibilityHint={
+            isDraft
+              ? "Opens the draft in the new task composer"
+              : "Sends when the environment reconnects. Opens the task for editing"
+          }
           accessibilityLabel={pendingTask.title}
           accessibilityRole="button"
           className={sidebarPane ? "bg-drawer active:bg-subtle" : undefined}
@@ -314,6 +335,8 @@ export const ThreadListV2PendingRow = memo(function ThreadListV2PendingRow(props
 export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly thread: EnvironmentThreadShell;
   readonly variant: "card" | "slim";
+  /** A message for this thread is waiting in the outbox. */
+  readonly hasQueuedMessages?: boolean;
   /** Snoozed-shelf row: shows its wake time and offers Wake. */
   readonly snoozed?: boolean;
   /** Pinned-block row: shows the pin glyph and offers Unpin. */
@@ -351,7 +374,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
-  readonly onSettleThread: (thread: EnvironmentThreadShell) => void;
+  readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onSnoozeThread: (thread: EnvironmentThreadShell, snoozedUntil: string) => void;
   readonly onUnsnoozeThread: (thread: EnvironmentThreadShell) => void;
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
@@ -633,6 +656,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           accessibilityLabel: `Settle ${thread.title}`,
           icon: "checkmark" as const,
           label: "Settle",
+          dismissOnPress: true as const,
           onPress: handleSettle,
         };
   }, [
@@ -688,6 +712,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         >
           {props.projectTitle ?? props.project?.title ?? ""}
         </Text>
+        {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
         {pinnedRow ? (
           <SymbolView
             name="pin"
@@ -809,7 +834,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     variant === "card" ? (
       <Pressable
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={thread.title}
+        accessibilityLabel={
+          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
+        }
         accessibilityRole="button"
         accessibilityState={{ selected }}
         onPress={() => {
@@ -849,7 +876,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ) : (
       <Pressable
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={thread.title}
+        accessibilityLabel={
+          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
+        }
         accessibilityRole="button"
         accessibilityState={{ selected }}
         className={sidebarPane ? undefined : "bg-screen"}
@@ -906,6 +935,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               />
             ) : null}
           </View>
+          {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
           <Text
             className={cn(
               "text-sm tabular-nums",
@@ -943,7 +973,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         onSwipeableWillOpen={props.onSwipeableWillOpen}
         primaryAction={primaryAction}
         secondaryAction={secondaryAction}
-        resetKey={`${thread.environmentId}:${thread.id}`}
+        resetKey={`${thread.environmentId}:${thread.id}:${variant}:${snoozedRow}`}
         simultaneousWithExternalGesture={props.simultaneousSwipeGesture}
         threadTitle={thread.title}
       >

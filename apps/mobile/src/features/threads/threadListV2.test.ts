@@ -166,6 +166,48 @@ describe("resolveThreadListV2Status", () => {
   });
 });
 
+describe("queued messages keep a settled thread active", () => {
+  const threads = [
+    makeThread({ id: ThreadId.make("active"), title: "Active" }),
+    makeThread({ id: ThreadId.make("settled"), title: "Settled", settledOverride: "settled" }),
+    makeThread({
+      id: ThreadId.make("settled-queued"),
+      title: "Settled with outbox",
+      settledOverride: "settled",
+    }),
+  ];
+  const queuedThreadKeys = new Set([`${environmentId}:settled-queued`]);
+
+  it("lists the thread in the active block instead of the settled shelf", () => {
+    const layout = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+      queuedThreadKeys,
+    });
+    expect(layout.items.map((item) => [item.thread.id, item.variant] as const)).toEqual([
+      ["active", "card"],
+      ["settled-queued", "card"],
+      ["settled", "slim"],
+    ]);
+    expect(layout.settledCount).toBe(1);
+  });
+
+  it("includes it in the reorderable active section", () => {
+    expect(
+      getThreadListV2OrderedSection({ threads, section: "active", now: NOW, queuedThreadKeys }).map(
+        (thread) => thread.id,
+      ),
+    ).toEqual(["active", "settled-queued"]);
+    expect(
+      getThreadListV2OrderedSection({ threads, section: "active", now: NOW }).map(
+        (thread) => thread.id,
+      ),
+    ).toEqual(["active"]);
+  });
+});
+
 describe("resolveThreadListV2SwipeActions", () => {
   it("offers settle and snooze for an active snoozable thread", () => {
     expect(
@@ -866,7 +908,22 @@ describe("buildThreadListV2Items settled paging", () => {
 });
 
 function makePendingTask(id: string): PendingNewTask {
+  const creation = {
+    projectId: ProjectId.make("project-1"),
+    workspaceMode: "worktree" as const,
+    branch: null,
+    worktreePath: null,
+  };
   return {
+    kind: "pending",
+    key: `pending-task:${id}`,
+    environmentId,
+    projectId: creation.projectId,
+    projectTitle: undefined,
+    projectCwd: undefined,
+    branch: null,
+    title: id,
+    createdAt: NOW,
     message: {
       environmentId,
       threadId: ThreadId.make(`thread-${id}`),
@@ -875,20 +932,9 @@ function makePendingTask(id: string): PendingNewTask {
       text: id,
       attachments: [],
       createdAt: NOW,
-      creation: {
-        projectId: ProjectId.make("project-1"),
-        workspaceMode: "worktree",
-        branch: null,
-        worktreePath: null,
-      },
+      creation,
     },
-    creation: {
-      projectId: ProjectId.make("project-1"),
-      workspaceMode: "worktree",
-      branch: null,
-      worktreePath: null,
-    },
-    title: id,
+    creation,
   };
 }
 

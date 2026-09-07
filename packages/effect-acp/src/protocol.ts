@@ -172,7 +172,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     if (message._tag === "Interrupt") {
       return;
     }
-yield* ensureActive;
+    yield* ensureActive;
     if (message._tag === "Exit" && dialectRequestIds.has(String(message.requestId))) {
       dialectRequestIds.delete(String(message.requestId));
       if (message.exit._tag === "Success") {

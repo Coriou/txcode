@@ -38,6 +38,7 @@ import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { environmentServerConfigsAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import {
   PendingTaskListRow,
   ThreadListGroupHeader,
@@ -212,6 +213,7 @@ export function HomeScreen(props: HomeScreenProps) {
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const threadListV2Enabled = useThreadListV2Enabled();
+  const queuedThreadKeys = useQueuedThreadKeys();
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
@@ -370,7 +372,7 @@ export function HomeScreen(props: HomeScreenProps) {
           ? props.pendingTasks
           : props.pendingTasks.filter((pendingTask) =>
               selectedProjectRefKeys.has(
-                scopedProjectKey(pendingTask.message.environmentId, pendingTask.creation.projectId),
+                scopedProjectKey(pendingTask.environmentId, pendingTask.projectId),
               ),
             ),
     [threadListV2Enabled, props.pendingTasks, selectedProjectRefKeys],
@@ -384,6 +386,7 @@ export function HomeScreen(props: HomeScreenProps) {
             projects: scopedProjects,
             threads: scopedThreads,
             pendingTasks: scopedPendingTasks,
+            queuedThreadKeys,
             environmentId: props.selectedEnvironmentId,
             searchQuery: props.searchQuery,
             matchedThreadKeys,
@@ -393,6 +396,7 @@ export function HomeScreen(props: HomeScreenProps) {
           }),
     [
       threadListV2Enabled,
+      queuedThreadKeys,
       props.projectGroupingMode,
       props.projectSortOrder,
       props.searchQuery,
@@ -490,12 +494,7 @@ export function HomeScreen(props: HomeScreenProps) {
   // Settled threads stay in the live shell stream (settled ≠ archived), so
   // the partition works directly off live shells — no snapshot merging or
   // optimistic holds.
-  const handleSettleThread = useCallback(
-    (thread: EnvironmentThreadShell) => {
-      void props.onSettleThread(thread);
-    },
-    [props.onSettleThread],
-  );
+  const handleSettleThread = props.onSettleThread;
   const handleSnoozeThread = useCallback(
     (thread: EnvironmentThreadShell, snoozedUntil: string) => {
       void props.onSnoozeThread(thread, snoozedUntil);
@@ -660,6 +659,7 @@ export function HomeScreen(props: HomeScreenProps) {
           now: new Date().toISOString(),
           settlementEnvironmentIds,
           snoozeEnvironmentIds,
+          queuedThreadKeys,
         }),
       });
     return { pinned: sectionPlanner("pinned"), active: sectionPlanner("active") };
@@ -667,6 +667,7 @@ export function HomeScreen(props: HomeScreenProps) {
     serverConfigs,
     props.threads,
     pendingOrder,
+    queuedThreadKeys,
     settlementEnvironmentIds,
     snoozeEnvironmentIds,
     nowMinute,
@@ -694,6 +695,7 @@ export function HomeScreen(props: HomeScreenProps) {
       matchedThreadKeys,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
+      queuedThreadKeys,
       settledLimit: settledVisibleCount,
       now: new Date().toISOString(),
       snoozedShelfExpanded,
@@ -702,6 +704,7 @@ export function HomeScreen(props: HomeScreenProps) {
     });
   }, [
     pendingOrder,
+    queuedThreadKeys,
     nowMinute,
     snoozeWakeTick,
     snoozedShelfExpanded,
@@ -740,10 +743,10 @@ export function HomeScreen(props: HomeScreenProps) {
       props.pendingTasks.filter(
         (pendingTask) =>
           (props.selectedEnvironmentId === null ||
-            pendingTask.message.environmentId === props.selectedEnvironmentId) &&
+            pendingTask.environmentId === props.selectedEnvironmentId) &&
           (v2ScopedProjectKeys === null ||
             v2ScopedProjectKeys.has(
-              scopedProjectKey(pendingTask.message.environmentId, pendingTask.creation.projectId),
+              scopedProjectKey(pendingTask.environmentId, pendingTask.projectId),
             )) &&
           (v2SearchQuery.length === 0 ||
             pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
@@ -774,8 +777,8 @@ export function HomeScreen(props: HomeScreenProps) {
         (nextItem?.type === "v2-pending" && !nextItem.showPendingDivider);
       if (item.type === "v2-pending") {
         const pendingScopeKey = scopedProjectKey(
-          item.pendingTask.message.environmentId,
-          item.pendingTask.creation.projectId,
+          item.pendingTask.environmentId,
+          item.pendingTask.projectId,
         );
         return (
           <ThreadListV2PendingRow
@@ -784,11 +787,11 @@ export function HomeScreen(props: HomeScreenProps) {
             projectTitle={v2ProjectTitleByProjectKey.get(pendingScopeKey)}
             environmentLabel={
               Object.keys(props.savedConnectionsById).length > 1
-                ? (props.savedConnectionsById[item.pendingTask.message.environmentId]
-                    ?.environmentLabel ?? null)
+                ? (props.savedConnectionsById[item.pendingTask.environmentId]?.environmentLabel ??
+                  null)
                 : null
             }
-            environmentMachine={machineByEnvironmentId.get(item.pendingTask.message.environmentId)}
+            environmentMachine={machineByEnvironmentId.get(item.pendingTask.environmentId)}
             showPendingDivider={item.showPendingDivider}
             showTrailingDivider={showTrailingDivider}
             onSelectPendingTask={props.onSelectPendingTask}
@@ -823,6 +826,7 @@ export function HomeScreen(props: HomeScreenProps) {
         <ThreadListV2Row
           thread={thread}
           variant={item.item.variant}
+          hasQueuedMessages={queuedThreadKeys.has(movedId)}
           snoozed={item.item.snoozed}
           pinned={item.item.pinned}
           snoozePresetMinute={nowMinute}
@@ -888,6 +892,7 @@ export function HomeScreen(props: HomeScreenProps) {
       activeReorderEnvironmentIds,
       threadMovePlanners,
       pendingOrder,
+      queuedThreadKeys,
       handleMoveThread,
       handlePinThread,
       handleRegenerateThreadTitle,
@@ -984,12 +989,9 @@ export function HomeScreen(props: HomeScreenProps) {
               variant="compact"
               pendingTask={item.pendingTask}
               environmentLabel={
-                props.savedConnectionsById[item.pendingTask.message.environmentId]
-                  ?.environmentLabel ?? null
+                props.savedConnectionsById[item.pendingTask.environmentId]?.environmentLabel ?? null
               }
-              environmentMachine={machineByEnvironmentId.get(
-                item.pendingTask.message.environmentId,
-              )}
+              environmentMachine={machineByEnvironmentId.get(item.pendingTask.environmentId)}
               isLast={item.isLast}
               onSelectPendingTask={props.onSelectPendingTask}
               onDeletePendingTask={props.onDeletePendingTask}
@@ -1001,6 +1003,7 @@ export function HomeScreen(props: HomeScreenProps) {
             <ThreadListRow
               variant="compact"
               thread={thread}
+              hasQueuedMessages={queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)}
               environmentLabel={
                 props.savedConnectionsById[thread.environmentId]?.environmentLabel ?? null
               }
@@ -1040,6 +1043,7 @@ export function HomeScreen(props: HomeScreenProps) {
       handleSwipeableWillOpen,
       handleRegenerateThreadTitle,
       machineByEnvironmentId,
+      queuedThreadKeys,
       props.onArchiveThread,
       props.onDeletePendingTask,
       props.onDeleteThread,
