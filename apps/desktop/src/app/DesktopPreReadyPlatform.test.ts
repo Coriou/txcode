@@ -26,6 +26,7 @@ const {
 vi.mock("electron", () => ({
   app: {
     setDesktopName: setDesktopNameMock,
+    isPackaged: true,
     getVersion: () => "0.0.37",
     commandLine: {
       appendSwitch: appendSwitchMock,
@@ -89,7 +90,7 @@ describe("DesktopPreReadyPlatform", () => {
           desktopName = name;
         });
         writeFileSyncMock.mockImplementation((path: string, contents: string) => {
-          if (path === "/xdg/applications/com.t3tools.T3Code.desktop") desktopEntry = contents;
+          if (path === "/xdg/applications/txcode.desktop") desktopEntry = contents;
         });
 
         return Effect.scoped(
@@ -101,9 +102,9 @@ describe("DesktopPreReadyPlatform", () => {
               ),
             );
             const identity = yield* Effect.promise(() => portalIdentity);
-            assert.equal(identity.desktopName, "com.t3tools.T3Code.desktop");
+            assert.equal(identity.desktopName, "txcode.desktop");
             assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
-            assert.include(identity.desktopEntry ?? "", "Name=Tx Code (Alpha)");
+            assert.include(identity.desktopEntry ?? "", "Name=Tx Code");
             assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
           }),
         ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
