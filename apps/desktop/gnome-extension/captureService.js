@@ -1,5 +1,9 @@
 // This policy is independent of Shell so lifecycle and authorization can be tested without a desktop.
+// Names derive from <linuxDesktopEntryName base>.SnapShot: upstream ships com.t3tools.T3Code(.Development);
+// the fork's desktop entry is txcode / t3code-dev (see DesktopEarlyElectronStartup.resolveLinuxDesktopEntryName).
 export const CLIENT_NAMES = [
+  "txcode.SnapShot",
+  "t3code-dev.SnapShot",
   "com.t3tools.T3Code.SnapShot",
   "com.t3tools.T3Code.Development.SnapShot",
 ];
@@ -43,7 +47,7 @@ export class CaptureService {
           break;
         }
       }
-      if (!allowed) throw new Error("Only T3 Code may request a snapshot.");
+      if (!allowed) throw new Error("Only Tx Code may request a snapshot.");
       const pid = options ? await this._getProcessId(sender) : undefined;
       this._checkSession();
       const snapshot = await this._takeSnapshot(options?.animate ?? false);
