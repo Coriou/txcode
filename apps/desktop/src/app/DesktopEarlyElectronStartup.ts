@@ -25,9 +25,14 @@ interface EarlyDesktopSettingsInput {
 type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
 
 export interface EarlyLinuxElectronOptions {
+  readonly isDevelopment: boolean;
   readonly linuxWmClass: string;
+  readonly linuxDesktopEntryName: string;
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
+
+export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
+  isDevelopment ? "t3code-dev.desktop" : "txcode.desktop";
 
 const trimNonEmpty = (value: string | undefined): string | null => {
   const trimmed = value?.trim();
@@ -80,8 +85,11 @@ export function resolveEarlyLinuxElectronOptions(
   input: EarlyLinuxElectronOptionsInput,
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
+  const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "t3code-dev" : "txcode",
+    isDevelopment,
+    linuxWmClass: isDevelopment ? "t3code-dev" : "txcode",
+    linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

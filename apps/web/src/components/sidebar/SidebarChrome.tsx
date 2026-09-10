@@ -106,7 +106,6 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-
 function SidebarUtilityItem({
   icon,
   label,

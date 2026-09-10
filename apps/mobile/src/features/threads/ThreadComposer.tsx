@@ -1,3 +1,4 @@
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -26,17 +27,16 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, View, type ViewStyle } from "react-native";
+import { Alert, Platform, Pressable, View, type ViewStyle } from "react-native";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import {
   composerAttachmentUploadBlockReason,
+  composerAttachmentsStillUploading,
   composerAttachmentUploadsAtom,
 } from "../../state/composer-attachment-uploads";
 import Animated, {
   FadeIn,
-  FadeInDown,
   FadeOut,
-  FadeOutDown,
   LinearTransition,
   ReduceMotion,
   useAnimatedStyle,
@@ -115,7 +115,6 @@ export interface ThreadComposerProps {
   readonly contentMaxWidth?: number;
   readonly bottomInset?: number;
   readonly connectionState: RemoteClientConnectionState;
-  readonly connectionError: string | null;
   readonly environmentLabel: string | null;
   readonly selectedThread: OrchestrationThreadShell;
   readonly hasCompactableConversation: boolean;
@@ -123,6 +122,8 @@ export interface ThreadComposerProps {
   readonly queueCount: number;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
+  /** Why sending is blocked right now (shown as the send button's label), or null. */
+  readonly sendBlockedReason?: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftMedia: () => Promise<void>;
@@ -136,7 +137,6 @@ export interface ThreadComposerProps {
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
   readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void;
-  readonly onReconnectEnvironment: () => void;
   readonly onExpandedChange?: (expanded: boolean) => void;
   /** Fires on editor focus/blur; hosts use it to vet stale keyboard state. */
   readonly onEditorFocusChange?: (focused: boolean) => void;
@@ -144,7 +144,7 @@ export interface ThreadComposerProps {
 
 /**
  * The pill / card container — renders with Expo's native GlassView on supported
- * iOS 26+ devices and keeps the existing opaque fallback elsewhere.
+ * iOS 26+ devices, with a frosted blur fallback where supported.
  * Exported so NewTaskDraftScreen can render the same composer chrome.
  */
 // The bottom-anchored dock position and clipped surface height use the same
@@ -172,6 +172,8 @@ export function ComposerSurface(props: {
   /** Morphs between the compact and expanded composer layouts. */
   readonly animateLayout?: boolean;
 }) {
+  const { materialYouStyleLayoutActive } = useAppearancePreferences();
+  const colors = useUniwindTheme();
   const targetBorderRadius =
     typeof props.style.borderRadius === "number" ? props.style.borderRadius : 0;
   const animatedBorderRadius = useSharedValue(targetBorderRadius);
@@ -193,7 +195,11 @@ export function ComposerSurface(props: {
   // clip leaves the glass and content at their final height on the first frame.
   return (
     <Animated.View
-      className="shadow-[0_6px_28px] shadow-adaptive-black-a15-a35"
+      className={
+        materialYouStyleLayoutActive
+          ? undefined
+          : "shadow-[0_6px_28px] shadow-adaptive-black-a15-a35"
+      }
       layout={layoutTransition}
       style={[
         animatedShapeStyle,
@@ -206,7 +212,12 @@ export function ComposerSurface(props: {
     >
       <AnimatedGlassSurface
         chrome="none"
-        fallbackClassName="border border-border bg-card-translucent"
+        fallbackColor={
+          materialYouStyleLayoutActive ? colors["--color-composer-surface"] : colors["--color-card"]
+        }
+        fallbackClassName={
+          materialYouStyleLayoutActive ? "border border-composer-border" : "border border-border"
+        }
         glassEffectStyle="regular"
         // The composer is a passive material containing interactive controls.
         // Keep native glass out of the interactive content's layout path.
@@ -228,78 +239,10 @@ export function ComposerSurface(props: {
   );
 }
 
-type ComposerStatusPillState = {
-  readonly kind: "unavailable" | "reconnecting";
-  readonly label: string;
-};
-
-function composerConnectionStatus(input: {
-  readonly connectionError: string | null;
-  readonly connectionState: RemoteClientConnectionState;
-  readonly environmentLabel: string | null;
-}): ComposerStatusPillState | null {
-  const environmentLabel = input.environmentLabel ?? "Environment";
-
-  switch (input.connectionState) {
-    case "connecting":
-    case "reconnecting":
-      return {
-        kind: "reconnecting",
-        label:
-          input.connectionError === null
-            ? `Reconnecting to ${environmentLabel}...`
-            : `Failed to connect. Retrying ${environmentLabel}...`,
-      };
-    case "offline":
-      return { kind: "unavailable", label: "You are offline" };
-    case "error":
-      return {
-        kind: "unavailable",
-        label: input.connectionError
-          ? `Failed to connect to ${environmentLabel}: ${input.connectionError}`
-          : `Failed to connect to ${environmentLabel}`,
-      };
-    case "available":
-      return { kind: "unavailable", label: `${environmentLabel} is not connected` };
-    case "connected":
-      return null;
-  }
-}
-
-const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(props: {
-  readonly onPress: () => void;
-  readonly status: ComposerStatusPillState;
-}) {
-  const isReconnecting = props.status.kind === "reconnecting";
-  return (
-    <Animated.View
-      className="absolute inset-x-0 bottom-full items-center pb-2"
-      entering={FadeInDown.duration(180)}
-      exiting={FadeOutDown.duration(140)}
-      pointerEvents="box-none"
-    >
-      <Pressable
-        accessibilityRole="button"
-        onPress={props.onPress}
-        className="max-w-full flex-row items-center gap-2 rounded-full bg-card px-3 py-2 shadow-sm active:opacity-70"
-      >
-        {isReconnecting ? (
-          <ActivityIndicator size="small" colorClassName={"accent-icon-muted"} />
-        ) : (
-          <View className="h-2 w-2 rounded-full bg-red-500" />
-        )}
-        <Text
-          className="max-w-[260px] text-sm font-t3-bold leading-snug text-foreground"
-          numberOfLines={1}
-        >
-          {props.status.label}
-        </Text>
-      </Pressable>
-    </Animated.View>
-  );
-});
-
 export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps) {
+  const { materialYouStyleLayoutActive, themeVariables: materialTheme } =
+    useAppearancePreferences();
+  const composerPanel = materialTheme["--color-composer-panel"];
   const navigation = useNavigation();
   const foregroundColor = useUniwindTheme()["--color-foreground"];
   const bodyText = useScaledTextRole("body");
@@ -324,18 +267,26 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     (props.selectedThread.session?.status === "running" ||
       props.selectedThread.session?.status === "starting");
 
+  const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
+  const attachmentsUploading =
+    props.connectionState === "connected" &&
+    composerAttachmentsStillUploading({
+      environmentId: props.environmentId,
+      attachments: props.draftAttachments,
+      serverConfig: props.serverConfig,
+      states: uploadStates,
+    });
+  // Every send goes through the outbox; the label says whether it leaves now
+  // or waits (for the connection, an earlier queued message, or an upload).
   const sendLabel =
-    props.connectionState !== "connected" || props.queueCount > 0 ? "Queue" : "Send";
+    props.connectionState !== "connected" || props.queueCount > 0 || attachmentsUploading
+      ? "Queue"
+      : "Send";
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
   const modelUnavailable =
     props.connectionState === "connected" &&
     isModelSelectionUnavailable(props.serverConfig, currentModelSelection);
-  const connectionStatus = composerConnectionStatus({
-    connectionError: props.connectionError,
-    connectionState: props.connectionState,
-    environmentLabel: props.environmentLabel,
-  });
   const selectedProviderStatus = useMemo(() => {
     if (!props.serverConfig) return null;
     return (
@@ -404,7 +355,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const isExpanded = isFocused || settingsSheetPresentation.isActive;
   const showsCompactDictation = isVoiceInputPresented && !isExpanded;
   const isToolbarVisible = isExpanded || isVoiceInputPresented;
-  const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
   const attachmentBlockReason = composerAttachmentUploadBlockReason({
     environmentId: props.environmentId,
     attachments: props.draftAttachments,
@@ -412,11 +362,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     serverConfig: props.serverConfig,
     states: uploadStates,
   });
+  const sendBlockedReason = props.sendBlockedReason ?? attachmentBlockReason;
   const canSend =
-    hasContent &&
-    !voiceInput.blocksSubmission &&
-    attachmentBlockReason === null &&
-    !modelUnavailable;
+    hasContent && !voiceInput.blocksSubmission && sendBlockedReason === null && !modelUnavailable;
 
   // Keep the feed inset aligned with the card or compact dictation strip.
   useEffect(() => {
@@ -611,13 +559,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       style={{
         paddingTop: isExpanded ? 8 : 6,
         paddingBottom: (props.bottomInset ?? 0) + (isExpanded ? 8 : 6),
+        backgroundColor: materialYouStyleLayoutActive ? composerPanel : undefined,
       }}
     >
       {/* The backdrop gradient lives on a plain View: Reanimated's Animated.View
           silently drops experimental_backgroundImage on Android, which left this
           strip fully transparent and the feed text legible through the composer. */}
       <View
-        className="absolute inset-0 bg-linear-to-b from-screen/0 via-screen/60 to-screen/90"
+        className={
+          materialYouStyleLayoutActive
+            ? "hidden"
+            : "absolute inset-0 bg-linear-to-b from-screen/0 via-screen/60 to-screen/90"
+        }
         pointerEvents="none"
       />
       <Animated.View
@@ -633,13 +586,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               onSelect={composerMenu.onSelect}
             />
           </View>
-        ) : null}
-
-        {connectionStatus ? (
-          <ComposerConnectionStatusPill
-            status={connectionStatus}
-            onPress={props.onReconnectEnvironment}
-          />
         ) : null}
 
         {modelUnavailable ? (
@@ -776,7 +722,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   />
                 ) : (
                   <ComposerActionButton
-                    accessibilityLabel={attachmentBlockReason ?? sendLabel}
+                    accessibilityLabel={sendBlockedReason ?? sendLabel}
                     icon="arrow.up"
                     variant="primary"
                     disabled={!canSend}
@@ -835,7 +781,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickMedia={props.onPickDraftMedia}
                       onPickFiles={props.onPickDraftFiles}
                     />
-                    <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
+                    <View className="min-w-0 shrink">
                       <ComposerInlineControl
                         accessibilityLabel="Model and reasoning settings"
                         emphasized
@@ -843,7 +789,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                           <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
                         }
                         label={currentModelOption?.label ?? currentModelSelection.model}
-                        maxWidth={152}
+                        maxWidth="100%"
                         onPress={openSettings}
                       />
                     </View>
@@ -867,7 +813,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     />
                   ) : voicePresentation.showsSend ? (
                     <ComposerActionButton
-                      accessibilityLabel={attachmentBlockReason ?? sendLabel}
+                      accessibilityLabel={sendBlockedReason ?? sendLabel}
                       icon="arrow.up"
                       variant="primary"
                       disabled={!canSend}
@@ -879,16 +825,6 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </ComposerDictationToolbar>
           </Animated.View>
         </ComposerSurface>
-
-        {/* Queue count */}
-        {props.queueCount > 0 ? (
-          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
-            <Text className="pt-2 text-xs text-foreground-muted">
-              {props.queueCount} queued message{props.queueCount === 1 ? "" : "s"} will send
-              automatically.
-            </Text>
-          </Animated.View>
-        ) : null}
       </Animated.View>
 
       <VideoPreviewModal source={previewVideo} onRequestClose={closePreview} />

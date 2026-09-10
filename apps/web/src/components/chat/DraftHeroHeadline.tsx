@@ -16,7 +16,8 @@ import {
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { describeWorkspaceDrift, useWorkspaceDriftVerdict } from "~/state/workspaceDrift";
-import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Menu,
@@ -200,7 +201,8 @@ export function DraftHeroHeadline({
                 value={entry.group.projectKey}
                 closeOnClick
               >
-                <span className="block min-w-0">
+                <span className="flex min-w-0 items-center gap-2">
+                  <ProjectFavicon project={entry.group} className="size-4 shrink-0" />
                   <Tooltip>
                     <TooltipTrigger render={<span className="block min-w-0 truncate" />}>
                       {entry.group.displayName}
@@ -209,10 +211,10 @@ export function DraftHeroHeadline({
                       {entry.group.displayName}
                     </TooltipPopup>
                   </Tooltip>
-                  {!entry.isPreferred && entry.group.memberProjects.length > 1 ? (
-                    <ProjectDriftHint group={entry.group} />
-                  ) : null}
                 </span>
+                {!entry.isPreferred && entry.group.memberProjects.length > 1 ? (
+                  <ProjectDriftHint group={entry.group} />
+                ) : null}
               </MenuRadioItem>
             );
           })}

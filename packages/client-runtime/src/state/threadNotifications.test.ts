@@ -47,6 +47,7 @@ function makeShell(overrides: Partial<OrchestrationThreadShell> = {}): Orchestra
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
+    pullRequests: [],
     ...overrides,
   };
 }
