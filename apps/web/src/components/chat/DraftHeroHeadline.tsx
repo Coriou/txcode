@@ -1,6 +1,6 @@
 import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
@@ -13,10 +13,12 @@ import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
+  projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { describeWorkspaceDrift, useWorkspaceDriftVerdict } from "~/state/workspaceDrift";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
@@ -29,6 +31,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 /** Quiet drift warning shown under picker entries whose target copy may lag its siblings. */
 function ProjectDriftHint(props: { readonly group: SidebarProjectSnapshot }) {
@@ -113,6 +116,26 @@ export function DraftHeroHeadline({
       threads,
     ],
   );
+  // Same-named projects on two machines are only told apart by where they
+  // live, so rows on another machine carry its icon once the catalog spans
+  // more than one environment; a single-machine catalog stays as it was.
+  const showProjectEnvironments = useMemo(
+    () => projectGroupsSpanEnvironments(projectGroups),
+    [projectGroups],
+  );
+  const environmentMachineById = useMemo(
+    () =>
+      new Map(
+        environments.map(
+          (environment) =>
+            [
+              environment.environmentId,
+              resolveEnvironmentMachineKind(environment.serverConfig),
+            ] as const,
+        ),
+      ),
+    [environments],
+  );
   const projectPickerEntries = useMemo(
     () =>
       buildSidebarProjectPickerEntries({
@@ -181,11 +204,13 @@ export function DraftHeroHeadline({
             );
             if (!hasExplicitComposerModelSelection(currentDraft)) {
               applyStickyState(draftId);
-              const defaultModelSelection =
-                project.defaultModelSelection ??
-                environments.find(
-                  (environment) => environment.environmentId === project.environmentId,
-                )?.serverConfig?.settings.defaultModelSelection;
+              const environmentSettings = environments.find(
+                (environment) => environment.environmentId === project.environmentId,
+              )?.serverConfig?.settings;
+              const defaultModelSelection = environmentSettings
+                ? resolveProjectSettings(environmentSettings, project.id, project).settings
+                    .defaultModelSelection
+                : project.defaultModelSelection;
               if (defaultModelSelection) {
                 setModelSelection(draftId, defaultModelSelection, {
                   replaceOptions: true,
@@ -211,6 +236,13 @@ export function DraftHeroHeadline({
                       {entry.group.displayName}
                     </TooltipPopup>
                   </Tooltip>
+                  {showProjectEnvironments ? (
+                    <ProjectEnvironmentBadge
+                      group={entry.group}
+                      primaryEnvironmentId={primaryEnvironmentId}
+                      machineByEnvironmentId={environmentMachineById}
+                    />
+                  ) : null}
                 </span>
                 {!entry.isPreferred && entry.group.memberProjects.length > 1 ? (
                   <ProjectDriftHint group={entry.group} />
