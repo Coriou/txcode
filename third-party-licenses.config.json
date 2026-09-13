@@ -149,6 +149,25 @@
       "name": "Expo text editor implementation",
       "noticeFile": "apps/mobile/modules/t3-composer-editor/LICENSE",
       "sourceUrl": "https://github.com/expo/expo"
+    },
+    {
+      "bundles": ["assets", "desktop", "mobile", "web"],
+      "license": "MIT",
+      "name": "Oh My Pi",
+      "sourceUrl": "https://github.com/can1357/oh-my-pi",
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": [
+            "Copyright (c) 2025 Mario Zechner",
+            "Copyright (c) 2025-2026 Can Bölük",
+            "Copyright (c) 2026 Stencil Labs, Inc."
+          ],
+          "preamble": [
+            "The Oh My Pi provider icon in apps/web/src/components/Icons.tsx (and the mobile provider icon) is adapted from the oh-my-pi project:\nhttps://github.com/can1357/oh-my-pi"
+          ]
+        }
+      ]
     }
   ],
   "packageOverrides": [
