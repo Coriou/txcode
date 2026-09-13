@@ -41,3 +41,6 @@ node_modules/
 .env*
 !.env.example
 .omp/
+
+# pnpm content-addressable store; never belongs in the repo.
+.pnpm-store/

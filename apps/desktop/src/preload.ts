@@ -159,6 +159,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   probeRemoteEditors: () => ipcRenderer.invoke(IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL, undefined),
   showThreadNotification: (input) =>
     ipcRenderer.invoke(IpcChannels.SHOW_THREAD_NOTIFICATION_CHANNEL, input),
+  pasteAsText: () => ipcRenderer.invoke(IpcChannels.PASTE_AS_TEXT_CHANNEL, undefined),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {
       if (typeof action !== "string") return;

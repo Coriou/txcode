@@ -1316,6 +1316,8 @@ export interface DesktopBridge {
    * builds lack it; callers fall back to VS Code only.
    */
   probeRemoteEditors?: () => Promise<readonly EditorId[]>;
+  /** Present when the desktop shell can perform an ordered plain-text paste. */
+  pasteAsText?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   showThreadNotification: (input: ShowThreadNotificationInput) => Promise<void>;
   onThreadNotificationActivate: (listener: (ref: ScopedThreadRef) => void) => () => void;
