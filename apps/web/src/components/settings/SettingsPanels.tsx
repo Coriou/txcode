@@ -3004,7 +3004,7 @@ export function GeneralSettingsPanel() {
       <SettingsSection id="notifications" title="Notifications">
         <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
           Desktop notifications come from your operating system's notification center. In the
-          browser, T3 Code asks for notification permission the first time you enable one.
+          browser, Tx Code asks for notification permission the first time you enable one.
         </p>
 
         <SettingsRow

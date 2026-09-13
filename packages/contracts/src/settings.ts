@@ -851,7 +851,7 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Server URL",
-        description: "Leave blank to let T3 Code spawn the server when needed.",
+        description: "Leave blank to let Tx Code spawn the server when needed.",
         providerSettingsForm: {
           placeholder: "http://127.0.0.1:4096",
           clearWhenEmpty: "omit",
@@ -900,7 +900,7 @@ export const OmpSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Launch arguments",
         description:
-          "Additional CLI arguments passed after the omp acp command. T3 Code controls approval flags from the thread permission mode.",
+          "Additional CLI arguments passed after the omp acp command. Tx Code controls approval flags from the thread permission mode.",
         providerSettingsForm: {
           placeholder: "e.g. --config /path/to/config.yml",
           clearWhenEmpty: "omit",
