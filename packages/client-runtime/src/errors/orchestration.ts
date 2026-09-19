@@ -12,6 +12,12 @@ export function wasBootstrapThreadDeleted(error: unknown): boolean {
   );
 }
 
+export function wasBootstrapThreadNotCreated(error: unknown): boolean {
+  return (
+    isOrchestrationDispatchCommandError(error) && error.bootstrapThreadDisposition === "not-created"
+  );
+}
+
 const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
 
 /** Server wording for a subscribeThread miss (`apps/server/src/ws.ts`: `Thread ${threadId} was not found`). */
