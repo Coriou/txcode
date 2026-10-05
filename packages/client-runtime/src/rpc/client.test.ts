@@ -1,10 +1,9 @@
 import {
-  EnvironmentAuthorizationError,
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentAuthorizationError,
+  ORCHESTRATION_V2_WS_METHODS,
+  OrchestrationV2GetThreadProjectionError,
   EnvironmentId,
-  AuthTerminalOperateScope,
-  ORCHESTRATION_WS_METHODS,
-  OrchestrationGetSnapshotError,
   PreviewTabId,
   ThreadId,
   type PreviewAutomationStreamEvent,
@@ -16,7 +15,6 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -35,12 +33,11 @@ import {
   type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import { wasSubscribeThreadNotFound } from "../errors/orchestration.ts";
 import * as RpcSession from "../rpc/session.ts";
+import { wasSubscribeThreadNotFound } from "../errors/orchestration.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   EnvironmentRpcRequestObserver,
-  expectedFailureRetryDelay,
   request,
   runStream,
   subscribe,
@@ -522,184 +519,33 @@ describe("environment RPC", () => {
     }),
   );
 
-  it.effect("recovers handled domain failures with capped backoff", () =>
+  it.effect("keeps handled domain failures dormant until a replacement session arrives", () =>
     Effect.gen(function* () {
-      const domainError = new Error("transient synchronization failure");
-      const subscriptionCount = yield* Ref.make(0);
-      const expectedFailureCount = yield* Ref.make(0);
-      const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () =>
-          Stream.unwrap(
-            Ref.getAndUpdate(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map((count) => (count < 2 ? Stream.fail(domainError) : Stream.never)),
-            ),
-          ),
-      } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const subscriptionFiber = yield* subscribe(
-        WS_METHODS.subscribeTerminalEvents,
-        {},
-        { onExpectedFailure: () => Ref.update(expectedFailureCount, (count) => count + 1) },
-      ).pipe(
-        Stream.runDrain,
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(expectedFailureCount)) >= 1) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(subscriptionCount)).toBe(1);
-
-      // First retry waits ~250ms (+ up to 25% jitter): nothing before it elapses.
-      yield* TestClock.adjust("100 millis");
-      expect(yield* Ref.get(subscriptionCount)).toBe(1);
-      yield* TestClock.adjust("300 millis"); // total 400ms > worst case 312.5ms
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(subscriptionCount)) >= 2) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(subscriptionCount)).toBe(2);
-
-      // Second retry waits ~500ms (+ jitter); the ceiling keeps growth bounded.
-      yield* TestClock.adjust("700 millis");
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(subscriptionCount)) >= 3) break;
-        yield* Effect.yieldNow;
-      }
-      yield* Fiber.interrupt(subscriptionFiber);
-
-      expect(yield* Ref.get(subscriptionCount)).toBe(3);
-      expect(yield* Ref.get(expectedFailureCount)).toBe(2);
-    }),
-  );
-
-  it.effect("ends the subscription permanently when the failure is terminal", () =>
-    Effect.gen(function* () {
-      const notFound = new Error("thread was not found");
-      const subscriptionCount = yield* Ref.make(0);
-      const handled = yield* Ref.make<Cause.Cause<unknown> | null>(null);
-      const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () =>
-          Stream.unwrap(
-            Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map(() => Stream.fail(notFound)),
-            ),
-          ),
-      } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const subscriptionFiber = yield* subscribe(
-        WS_METHODS.subscribeTerminalEvents,
-        {},
-        {
-          terminalFailure: {
-            matches: (error) => error === notFound,
-            handle: (cause) => Ref.set(handled, cause),
-          },
+      const domainError = new Error("terminal subscription rejected");
+      const subscriptions: string[] = [];
+      const observedFailures: Error[] = [];
+      const firstClient = {
+        [WS_METHODS.subscribeTerminalEvents]: () => {
+          subscriptions.push("first");
+          return Stream.fail(domainError);
         },
-      ).pipe(
-        Stream.runDrain,
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-      for (let attempt = 0; attempt < 100 && (yield* Ref.get(handled)) === null; attempt += 1) {
-        yield* Effect.yieldNow;
-      }
-
-      expect(yield* Ref.get(subscriptionCount)).toBe(1);
-      expect(yield* Ref.get(handled)).not.toBeNull();
-
-      // Far past any retry delay: a terminal failure must not re-attempt.
-      yield* TestClock.adjust("30 seconds");
-      yield* Effect.yieldNow;
-      yield* Fiber.interrupt(subscriptionFiber);
-
-      expect(yield* Ref.get(subscriptionCount)).toBe(1);
-    }),
-  );
-
-  it.effect("does not treat failures rejected by the terminal classifier as terminal", () =>
-    Effect.gen(function* () {
-      const transient = new Error("transient snapshot failure");
-      const subscriptionCount = yield* Ref.make(0);
-      const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () =>
-          Stream.unwrap(
-            Ref.getAndUpdate(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map((count) => (count === 0 ? Stream.fail(transient) : Stream.never)),
-            ),
-          ),
       } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
+      const secondClient = {
+        [WS_METHODS.subscribeTerminalEvents]: () => {
+          subscriptions.push("second");
+          return Stream.never;
+        },
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, retryCount, supervisor } = yield* makeHarness();
 
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      yield* SubscriptionRef.set(activeSession, Option.some(session(firstClient)));
       const subscriptionFiber = yield* subscribe(
         WS_METHODS.subscribeTerminalEvents,
         {},
-        {
-          onExpectedFailure: () => Effect.void,
-          terminalFailure: {
-            matches: () => false,
-            handle: () => Effect.void,
-          },
-        },
-      ).pipe(
-        Stream.runDrain,
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-
-      // The retry sleep must be scheduled before virtual time advances.
-      for (
-        let attempt = 0;
-        attempt < 100 && (yield* Ref.get(subscriptionCount)) < 1;
-        attempt += 1
-      ) {
-        yield* Effect.yieldNow;
-      }
-      yield* TestClock.adjust("400 millis");
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(subscriptionCount)) >= 2) break;
-        yield* Effect.yieldNow;
-      }
-      yield* Fiber.interrupt(subscriptionFiber);
-
-      // Classified as a regular expected failure: retried once, handler untouched.
-      expect(yield* Ref.get(subscriptionCount)).toBe(2);
-    }),
-  );
-
-  it.effect("keeps retrying and recovers when input construction fails", () =>
-    Effect.gen(function* () {
-      const inputFailure = new EnvironmentAuthorizationError({
-        message: "http snapshot load failed",
-        requiredScope: AuthTerminalOperateScope,
-      });
-      let failInput = true;
-      const observedFailures: unknown[] = [];
-      const subscriptionCount = yield* Ref.make(0);
-      const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () =>
-          Stream.unwrap(
-            Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map(() => Stream.never),
-            ),
-          ),
-      } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const subscriptionFiber = yield* subscribeDynamic(
-        WS_METHODS.subscribeTerminalEvents,
-        () => Effect.suspend(() => (failInput ? Effect.fail(inputFailure) : Effect.succeed({}))),
         {
           onExpectedFailure: (cause) =>
             Effect.sync(() => {
-              observedFailures.push(Cause.squash(cause));
+              observedFailures.push(Cause.squash(cause) as Error);
             }),
         },
       ).pipe(
@@ -711,24 +557,177 @@ describe("environment RPC", () => {
         yield* Effect.yieldNow;
       }
 
-      // The failure surfaced and the RPC was never issued.
-      expect(observedFailures).toEqual([inputFailure]);
-      expect(yield* Ref.get(subscriptionCount)).toBe(0);
+      expect(subscriptions).toEqual(["first"]);
+      expect(observedFailures).toEqual([domainError]);
 
-      // The next attempt constructs input successfully and subscribes: the
-      // fiber survived the input failure.
-      failInput = false;
-      yield* TestClock.adjust("400 millis");
-      for (
-        let attempt = 0;
-        attempt < 100 && (yield* Ref.get(subscriptionCount)) < 1;
-        attempt += 1
-      ) {
+      yield* SubscriptionRef.set(activeSession, Option.some(session(secondClient)));
+      for (let attempt = 0; attempt < 100 && subscriptions.length < 2; attempt += 1) {
         yield* Effect.yieldNow;
       }
       yield* Fiber.interrupt(subscriptionFiber);
 
+      expect(subscriptions).toEqual(["first", "second"]);
+      expect(yield* Ref.get(retryCount)).toBe(0);
+    }),
+  );
+
+  it.effect("retries handled domain failures within the same session when configured", () =>
+    Effect.gen(function* () {
+      const domainError = new Error("thread not found yet");
+      const subscriptionCount = yield* Ref.make(0);
+      const expectedFailureCount = yield* Ref.make(0);
+      const client = {
+        [WS_METHODS.subscribeTerminalEvents]: () =>
+          Stream.unwrap(
+            Ref.getAndUpdate(subscriptionCount, (count) => count + 1).pipe(
+              Effect.map((count) => (count === 0 ? Stream.fail(domainError) : Stream.never)),
+            ),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      const subscriptionFiber = yield* subscribe(
+        WS_METHODS.subscribeTerminalEvents,
+        {},
+        {
+          onExpectedFailure: () => Ref.update(expectedFailureCount, (count) => count + 1),
+          retryExpectedFailureAfter: "100 millis",
+        },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((yield* Ref.get(expectedFailureCount)) >= 1) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+
       expect(yield* Ref.get(subscriptionCount)).toBe(1);
+      expect(yield* Ref.get(expectedFailureCount)).toBe(1);
+
+      yield* TestClock.adjust("100 millis");
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((yield* Ref.get(subscriptionCount)) >= 2) {
+          break;
+        }
+        yield* Effect.yieldNow;
+      }
+      yield* Fiber.interrupt(subscriptionFiber);
+
+      expect(yield* Ref.get(subscriptionCount)).toBe(2);
+      expect(yield* Ref.get(expectedFailureCount)).toBe(1);
+    }),
+  );
+
+  it.effect("doubles the retry delay for repeated failures and resets it after a value", () =>
+    Effect.gen(function* () {
+      const domainError = new Error("thread not hydrated yet");
+      const subscriptions = yield* Queue.unbounded<number>();
+      const failures = yield* Queue.unbounded<void>();
+      let attempts = 0;
+      const client = {
+        [WS_METHODS.subscribeTerminalEvents]: () =>
+          Stream.unwrap(
+            Effect.sync(() => {
+              attempts += 1;
+              return attempts;
+            }).pipe(
+              Effect.tap((attempt) => Queue.offer(subscriptions, attempt)),
+              Effect.map((attempt) => {
+                if (attempt <= 2) return Stream.fail(domainError);
+                if (attempt === 3)
+                  return Stream.concat(Stream.make("event"), Stream.fail(domainError));
+                return Stream.never;
+              }),
+            ),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      const subscriptionFiber = yield* subscribe(
+        WS_METHODS.subscribeTerminalEvents,
+        {},
+        {
+          onExpectedFailure: () => Queue.offer(failures, undefined),
+          retryExpectedFailureAfter: "100 millis",
+        },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+
+      expect(yield* Queue.take(subscriptions)).toBe(1);
+      yield* Queue.take(failures);
+      yield* TestClock.adjust("100 millis");
+      expect(yield* Queue.take(subscriptions)).toBe(2);
+      yield* Queue.take(failures);
+      // The second retry waits 200ms, so 100ms is not enough.
+      yield* TestClock.adjust("100 millis");
+      expect(Option.isNone(yield* Queue.poll(subscriptions))).toBe(true);
+      yield* TestClock.adjust("100 millis");
+      expect(yield* Queue.take(subscriptions)).toBe(3);
+      // Attempt 3 delivered a value before failing, so the delay is back to 100ms.
+      yield* Queue.take(failures);
+      yield* TestClock.adjust("100 millis");
+      expect(yield* Queue.take(subscriptions)).toBe(4);
+      yield* Fiber.interrupt(subscriptionFiber);
+    }),
+  );
+
+  it.effect("waits for the next session after an authorization failure", () =>
+    Effect.gen(function* () {
+      const subscriptions = yield* Queue.unbounded<void>();
+      const failed = yield* Deferred.make<void>();
+      let attempts = 0;
+      const client = {
+        [WS_METHODS.subscribeTerminalEvents]: () =>
+          Stream.unwrap(
+            Queue.offer(subscriptions, undefined).pipe(
+              Effect.map(() => {
+                attempts += 1;
+                return attempts === 1
+                  ? Stream.fail(
+                      new EnvironmentAuthorizationError({
+                        message: "Missing scope",
+                        requiredScope: "orchestration:read",
+                      }),
+                    )
+                  : Stream.never;
+              }),
+            ),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      const subscriptionFiber = yield* subscribe(
+        WS_METHODS.subscribeTerminalEvents,
+        {},
+        {
+          onExpectedFailure: () => Deferred.succeed(failed, undefined).pipe(Effect.asVoid),
+          retryExpectedFailureAfter: "100 millis",
+        },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+
+      yield* Queue.take(subscriptions);
+      yield* Deferred.await(failed);
+      yield* TestClock.adjust("1 minute");
+      expect(Option.isNone(yield* Queue.poll(subscriptions))).toBe(true);
+
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      yield* Queue.take(subscriptions);
+      yield* Fiber.interrupt(subscriptionFiber);
+      expect(attempts).toBe(2);
     }),
   );
 
@@ -765,6 +764,7 @@ describe("environment RPC", () => {
               Effect.sync(() => {
                 expectedFailureCount += 1;
               }),
+            retryExpectedFailureAfter: "250 millis",
           },
         ).pipe(
           Stream.runDrain,
@@ -819,6 +819,7 @@ describe("environment RPC", () => {
             Effect.sync(() => {
               observations.push("expected failure");
             }).pipe(Effect.andThen(Deferred.succeed(expectedFailure, undefined)), Effect.asVoid),
+          retryExpectedFailureAfter: "250 millis",
         },
       ).pipe(
         Stream.runDrain,
@@ -827,8 +828,7 @@ describe("environment RPC", () => {
         Effect.forkChild,
       );
       yield* Deferred.await(expectedFailure);
-      // Worst-case first backoff delay is 250ms * 1.25 jitter.
-      yield* TestClock.adjust("400 millis");
+      yield* TestClock.adjust("250 millis");
       const exit = yield* Fiber.join(fiber);
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
@@ -839,190 +839,156 @@ describe("environment RPC", () => {
       expect(observedDefects).toEqual([defect]);
     }),
   );
-
-  it.effect("retries a combined transport-and-domain failure as expected", () =>
-    Effect.gen(function* () {
-      const transportError = new RpcClientError.RpcClientError({
-        reason: new RpcClientError.RpcClientDefect({
-          message: "socket closed",
-          cause: new Error("socket closed"),
-        }),
-      });
-      const domainError = new Error("transient synchronization failure");
-      const subscriptionCount = yield* Ref.make(0);
-      const expectedFailureCount = yield* Ref.make(0);
-      const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () =>
-          Stream.unwrap(
-            Ref.getAndUpdate(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map((count) =>
-                count < 1
-                  ? Stream.failCause(
-                      Cause.fromReasons([
-                        Cause.makeFailReason(transportError),
-                        Cause.makeFailReason(domainError),
-                      ]),
-                    )
-                  : Stream.never,
-              ),
-            ),
-          ),
-      } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const subscriptionFiber = yield* subscribe(
-        WS_METHODS.subscribeTerminalEvents,
-        {},
-        { onExpectedFailure: () => Ref.update(expectedFailureCount, (count) => count + 1) },
-      ).pipe(
-        Stream.runDrain,
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(expectedFailureCount)) >= 1) break;
-        yield* Effect.yieldNow;
-      }
-      expect(yield* Ref.get(subscriptionCount)).toBe(1);
-
-      // Worst-case first backoff delay is 250ms * 1.25 jitter.
-      yield* TestClock.adjust("400 millis");
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        if ((yield* Ref.get(subscriptionCount)) >= 2) break;
-        yield* Effect.yieldNow;
-      }
-      yield* Fiber.interrupt(subscriptionFiber);
-
-      // Neither dormant nor terminal: a cause mixing an RPC transport error
-      // with a plain domain failure is handled like any expected failure.
-      expect(yield* Ref.get(subscriptionCount)).toBe(2);
-      expect(yield* Ref.get(expectedFailureCount)).toBe(1);
-    }),
-  );
-
-  it.effect("lets transport dormancy win over a permissive terminal classifier", () =>
-    Effect.gen(function* () {
-      const transportError = new RpcClientError.RpcClientError({
-        reason: new RpcClientError.RpcClientDefect({
-          message: "socket closed",
-          cause: new Error("socket closed"),
-        }),
-      });
-      const subscriptionCount = yield* Ref.make(0);
-      const handled = yield* Ref.make<Cause.Cause<unknown> | null>(null);
-      const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () =>
-          Stream.unwrap(
-            Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map(() => Stream.fail(transportError)),
-            ),
-          ),
-      } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const subscriptionFiber = yield* subscribe(
-        WS_METHODS.subscribeTerminalEvents,
-        {},
-        {
-          terminalFailure: {
-            matches: () => true,
-            handle: (cause) => Ref.set(handled, cause),
-          },
-        },
-      ).pipe(
-        Stream.runDrain,
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-      for (
-        let attempt = 0;
-        attempt < 100 && (yield* Ref.get(subscriptionCount)) < 1;
-        attempt += 1
-      ) {
-        yield* Effect.yieldNow;
-      }
-      yield* Effect.yieldNow;
-
-      // Far past any retry delay: the failure went to transport dormancy —
-      // waiting for the next session — so the terminal handler never ran and
-      // no backoff re-attempt fired either.
-      yield* TestClock.adjust("30 seconds");
-      yield* Effect.yieldNow;
-      yield* Fiber.interrupt(subscriptionFiber);
-
-      expect(yield* Ref.get(handled)).toBeNull();
-      expect(yield* Ref.get(subscriptionCount)).toBe(1);
-    }),
-  );
-
-  it.effect("ends the subscription when input construction fails terminally", () =>
-    Effect.gen(function* () {
-      const notFound = new OrchestrationGetSnapshotError({
-        message: "Thread x was not found",
-        cause: "x",
-      });
-      const subscriptionCount = yield* Ref.make(0);
-      const handled = yield* Ref.make<Cause.Cause<unknown> | null>(null);
-      const client = {
-        [ORCHESTRATION_WS_METHODS.subscribeThread]: () =>
-          Stream.unwrap(
-            Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
-              Effect.map(() => Stream.never),
-            ),
-          ),
-      } as unknown as WsRpcProtocolClient;
-      const { activeSession, supervisor } = yield* makeHarness();
-
-      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const subscriptionFiber = yield* subscribeDynamic(
-        ORCHESTRATION_WS_METHODS.subscribeThread,
-        () => Effect.fail(notFound),
-        {
-          terminalFailure: {
-            matches: wasSubscribeThreadNotFound,
-            handle: (cause) => Ref.set(handled, cause),
-          },
-        },
-      ).pipe(
-        Stream.runDrain,
-        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
-        Effect.forkChild,
-      );
-      for (let attempt = 0; attempt < 100 && (yield* Ref.get(handled)) === null; attempt += 1) {
-        yield* Effect.yieldNow;
-      }
-
-      // The not-found input failure classified as terminal before any RPC
-      // method invocation.
-      expect(yield* Ref.get(handled)).not.toBeNull();
-      expect(yield* Ref.get(subscriptionCount)).toBe(0);
-
-      // Far past any retry delay: terminal handling stops resubscribing.
-      yield* TestClock.adjust("30 seconds");
-      yield* Effect.yieldNow;
-      yield* Fiber.interrupt(subscriptionFiber);
-
-      expect(yield* Ref.get(subscriptionCount)).toBe(0);
-    }),
-  );
 });
 
-describe("expectedFailureRetryDelay", () => {
-  it("grows exponentially, caps at the ceiling, and bounds jitter", () => {
-    expect(Duration.toMillis(expectedFailureRetryDelay(0, 0))).toBe(250);
-    expect(Duration.toMillis(expectedFailureRetryDelay(1, 0))).toBe(500);
-    expect(Duration.toMillis(expectedFailureRetryDelay(2, 0))).toBe(1_000);
-    expect(Duration.toMillis(expectedFailureRetryDelay(3, 0))).toBe(2_000);
-    expect(Duration.toMillis(expectedFailureRetryDelay(6, 0))).toBe(8_000);
-    expect(Duration.toMillis(expectedFailureRetryDelay(20, 0))).toBe(8_000);
-    // Jitter ∈ [1, 1.25]: never shorter than the bare schedule, never past +25%.
-    expect(Duration.toMillis(expectedFailureRetryDelay(0, 1))).toBeGreaterThanOrEqual(250);
-    expect(Duration.toMillis(expectedFailureRetryDelay(0, 1))).toBeLessThanOrEqual(312.5);
-    expect(Duration.toMillis(expectedFailureRetryDelay(20, 1))).toBeLessThanOrEqual(10_000);
-    // The ceiling applies before jitter: 250·2⁶ clamps to 8s, then ×1.25
-    // lands exactly on 10s (jitter-then-clamp ordering would stay at 8s).
-    expect(Duration.toMillis(expectedFailureRetryDelay(6, 1))).toBe(10_000);
-  });
+// Fork: terminal domain failures share the upstream retry envelope, including input construction.
+describe("terminal subscription failures", () => {
+  it.effect.each(["input", "stream"] as const)(
+    "parks a %s miss until a new session arrives",
+    (location) =>
+      Effect.gen(function* () {
+        const missing = new OrchestrationV2GetThreadProjectionError({
+          threadId: ThreadId.make("missing"),
+          message: "No projection",
+          reason: "not-found",
+        });
+        const handled = yield* Queue.unbounded<void>();
+        let inputs = 0;
+        let calls = 0;
+        const client = {
+          [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: () => {
+            calls += 1;
+            return Stream.fail(missing);
+          },
+        } as unknown as WsRpcProtocolClient;
+        const { activeSession, supervisor } = yield* makeHarness();
+        yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+        const fiber = yield* subscribeDynamic(
+          ORCHESTRATION_V2_WS_METHODS.subscribeThread,
+          () =>
+            Effect.sync(() => {
+              inputs += 1;
+            }).pipe(
+              Effect.andThen(
+                location === "input"
+                  ? Effect.fail(missing)
+                  : Effect.succeed({ threadId: missing.threadId }),
+              ),
+            ),
+          {
+            onExpectedFailure: () => Effect.die("Terminal misses must bypass retry handling"),
+            retryExpectedFailureAfter: "100 millis",
+            terminalFailure: {
+              matches: wasSubscribeThreadNotFound,
+              handle: () => Queue.offer(handled, undefined),
+            },
+          },
+        ).pipe(
+          Stream.runDrain,
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.forkChild,
+        );
+        yield* Queue.take(handled);
+        yield* TestClock.adjust("1 minute");
+        expect(inputs).toBe(1);
+        expect(calls).toBe(location === "input" ? 0 : 1);
+        yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+        yield* Queue.take(handled);
+        expect(inputs).toBe(2);
+        yield* Fiber.interrupt(fiber);
+      }),
+  );
+
+  it.effect("retries an initializer domain failure rejected by the terminal classifier", () =>
+    Effect.gen(function* () {
+      const transient = new OrchestrationV2GetThreadProjectionError({
+        threadId: ThreadId.make("thread"),
+        message: "Temporarily unavailable",
+      });
+      const failed = yield* Deferred.make<void>();
+      const subscribed = yield* Deferred.make<void>();
+      let inputs = 0;
+      const client = {
+        [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: () =>
+          Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      const fiber = yield* subscribeDynamic(
+        ORCHESTRATION_V2_WS_METHODS.subscribeThread,
+        () =>
+          Effect.suspend(() =>
+            ++inputs === 1
+              ? Effect.fail(transient)
+              : Effect.succeed({ threadId: transient.threadId }),
+          ),
+        {
+          onExpectedFailure: () => Deferred.succeed(failed, undefined).pipe(Effect.asVoid),
+          retryExpectedFailureAfter: "100 millis",
+          terminalFailure: {
+            matches: wasSubscribeThreadNotFound,
+            handle: () => Effect.die("Unexpected terminal classification"),
+          },
+        },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(failed);
+      yield* TestClock.adjust("100 millis");
+      yield* Deferred.await(subscribed);
+      expect(inputs).toBe(2);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  it.effect("keeps transport dormancy ahead of a permissive terminal classifier", () =>
+    Effect.gen(function* () {
+      const observed = yield* Queue.unbounded<void>();
+      const transport = new RpcClientError.RpcClientError({
+        reason: new RpcClientError.RpcClientDefect({ message: "closed", cause: "closed" }),
+      });
+      let handled = 0;
+      let calls = 0;
+      const client = {
+        [WS_METHODS.subscribeTerminalEvents]: () => {
+          calls += 1;
+          return Stream.fail(transport);
+        },
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      const fiber = yield* subscribe(
+        WS_METHODS.subscribeTerminalEvents,
+        {},
+        {
+          onDefect: () => Queue.offer(observed, undefined),
+          terminalFailure: {
+            matches: () => true,
+            handle: () =>
+              Effect.sync(() => {
+                handled += 1;
+              }),
+          },
+        },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+      yield* Queue.take(observed);
+      yield* TestClock.adjust("1 minute");
+      expect(handled).toBe(0);
+      expect(calls).toBe(1);
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      yield* Queue.take(observed);
+      expect(calls).toBe(2);
+      expect(handled).toBe(0);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
 });

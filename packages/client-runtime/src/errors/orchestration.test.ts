@@ -1,8 +1,10 @@
 import {
   OrchestrationDispatchCommandError,
-  OrchestrationGetSnapshotError,
+  OrchestrationV2GetThreadProjectionError,
+  ThreadId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Schema from "effect/Schema";
 
 import {
   wasBootstrapThreadDeleted,
@@ -11,45 +13,29 @@ import {
 } from "./orchestration.ts";
 
 describe("wasSubscribeThreadNotFound", () => {
-  it("matches the typed not-found error", () => {
+  it("recognizes a confirmed miss after the error crosses the wire", () => {
+    const codec = Schema.fromJsonString(OrchestrationV2GetThreadProjectionError);
+    const error = new OrchestrationV2GetThreadProjectionError({
+      threadId: ThreadId.make("thread-1"),
+      message: "Failed to load orchestration V2 thread thread-1",
+      reason: "not-found",
+    });
     expect(
-      wasSubscribeThreadNotFound(
-        new OrchestrationGetSnapshotError({
-          message: "Thread thread-1 was not found",
-          cause: "thread-1",
-        }),
-      ),
+      wasSubscribeThreadNotFound(Schema.decodeSync(codec)(Schema.encodeSync(codec)(error))),
     ).toBe(true);
   });
 
-  it("rejects messages with trailing content", () => {
+  it("does not infer deletion from message text, legacy errors, or untyped values", () => {
     expect(
       wasSubscribeThreadNotFound(
-        new OrchestrationGetSnapshotError({
-          message: "Thread thread-1 was not found (will retry)",
-          cause: "thread-1",
+        new OrchestrationV2GetThreadProjectionError({
+          threadId: ThreadId.make("thread-1"),
+          message: "Thread thread-1 was not found",
         }),
       ),
     ).toBe(false);
-  });
-
-  it("rejects plain errors with a matching message", () => {
+    expect(wasSubscribeThreadNotFound({ reason: "not-found" })).toBe(false);
     expect(wasSubscribeThreadNotFound(new Error("Thread thread-1 was not found"))).toBe(false);
-  });
-
-  it("rejects other snapshot errors", () => {
-    expect(
-      wasSubscribeThreadNotFound(
-        new OrchestrationGetSnapshotError({
-          message: "Failed to load thread thread-1",
-          cause: "thread-1",
-        }),
-      ),
-    ).toBe(false);
-  });
-
-  it("rejects unrelated errors", () => {
-    expect(wasSubscribeThreadNotFound(new Error("boom"))).toBe(false);
     expect(wasSubscribeThreadNotFound(null)).toBe(false);
   });
 });

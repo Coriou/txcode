@@ -114,8 +114,6 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.isDevelopment, false);
       assert.equal(environment.appUserModelId, "net.coriou.txcode");
       assert.equal(environment.linuxWmClass, "txcode");
-      assert.equal(environment.userDataDirName, "txcode");
-      assert.equal(environment.legacyUserDataDirName, "Tx Code (Legacy)");
       assert.equal(environment.stateDir, "/tmp/t3/userdata");
       assert.equal(environment.otlpProtocol, "http/json");
     }),

@@ -1,4 +1,4 @@
-import { ShowThreadNotificationInputSchema } from "@t3tools/contracts";
+import { ShowThreadNotificationInputSchema, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -10,11 +10,11 @@ import * as DesktopIpc from "../DesktopIpc.ts";
 export const showThreadNotification = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.SHOW_THREAD_NOTIFICATION_CHANNEL,
   payload: ShowThreadNotificationInputSchema,
-  result: Schema.Void,
+  result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.notifications.show")(function* (input) {
     const notifications = yield* ElectronNotifications.ElectronNotifications;
     if (!(yield* notifications.isSupported)) {
-      return;
+      return false;
     }
 
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
@@ -22,7 +22,11 @@ export const showThreadNotification = DesktopIpc.makeIpcMethod({
     // or CREATE one when none is live, then tell THAT renderer which thread
     // to open. Summaries carry no threadRef and only bring the window up.
     yield* notifications.show(
-      { title: input.title, body: input.body },
+      {
+        title: input.title,
+        body: input.body,
+        ...(input.tag === undefined ? {} : { tag: input.tag }),
+      },
       Effect.gen(function* () {
         const window = yield* desktopWindow.revealOrCreateMain;
         if (!input.threadRef || window.isDestroyed()) {
@@ -38,5 +42,16 @@ export const showThreadNotification = DesktopIpc.makeIpcMethod({
         );
       }).pipe(Effect.ignore),
     );
+    return true;
+  }),
+});
+
+export const closeThreadNotification = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.CLOSE_THREAD_NOTIFICATION_CHANNEL,
+  payload: TrimmedNonEmptyString,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.notifications.close")(function* (tag) {
+    const notifications = yield* ElectronNotifications.ElectronNotifications;
+    yield* notifications.close(tag);
   }),
 });

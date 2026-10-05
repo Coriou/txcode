@@ -13,7 +13,10 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeOmpTextGeneration } from "../../textGeneration/OmpTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeOmpAdapter } from "../Layers/OmpAdapter.ts";
+import {
+  OmpAdapterV2Driver,
+  type OmpAdapterV2DriverEnv,
+} from "../../orchestration-v2/Adapters/OmpAdapterV2.ts";
 import {
   buildInitialOmpProviderSnapshot,
   checkOmpProviderStatus,
@@ -58,6 +61,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 });
 
 export type OmpDriverEnv =
+  | OmpAdapterV2DriverEnv
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -99,7 +103,6 @@ export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
-      const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -123,11 +126,24 @@ export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
         ),
       );
 
-      const adapter = yield* makeOmpAdapter(effectiveConfig, {
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      const orchestrationAdapter = yield* OmpAdapterV2Driver.create({
         instanceId,
-      });
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to build Oh My Pi orchestration adapter.",
+              cause,
+            }),
+        ),
+      );
       const textGeneration = yield* makeOmpTextGeneration(effectiveConfig, processEnv);
       const checkProvider = checkOmpProviderStatus(effectiveConfig, processEnv).pipe(
         Effect.map(stampIdentity),
@@ -174,7 +190,7 @@ export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

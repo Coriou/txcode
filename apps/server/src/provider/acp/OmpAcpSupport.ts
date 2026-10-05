@@ -4,7 +4,7 @@ import {
   type ProviderOptionSelection,
   type ProviderUserInputAnswers,
   type RuntimeMode,
-  type UserInputQuestion,
+  type OrchestrationV2UserInputQuestion,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -12,7 +12,10 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
+import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import { getProviderOptionStringSelectionValue } from "@t3tools/shared/model";
 import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 
@@ -34,7 +37,7 @@ export const OMP_ACP_CLIENT_CAPABILITIES = {
 
 export interface OmpAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
-  "authMethodId" | "clientCapabilities" | "spawn"
+  "authMethodId" | "spawn"
 > {
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly ompSettings: Pick<OmpSettings, "binaryPath" | "launchArgs"> | null | undefined;
@@ -48,12 +51,8 @@ export interface OmpAcpModelSelectionErrorContext {
   readonly configId?: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function parseOmpResume(raw: unknown): { sessionId: string } | undefined {
-  if (!isRecord(raw)) return undefined;
+  if (!Predicate.isObject(raw) || Array.isArray(raw)) return undefined;
   if (raw.schemaVersion !== OMP_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
   return { sessionId: raw.sessionId.trim() };
@@ -185,11 +184,43 @@ export function selectOmpPermissionOptionId(
   return undefined;
 }
 
+// ACP V2 permits future schema variants; decode only OMP's primitive form dialect.
+const OmpPropertyMetadata = {
+  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  description: Schema.optionalKey(Schema.NullOr(Schema.String)),
+};
+const OmpEnumChoice = Schema.Struct({ const: Schema.String, title: Schema.String });
+const OmpElicitationProperty = Schema.Union([
+  Schema.Struct({
+    ...OmpPropertyMetadata,
+    type: Schema.Literal("string"),
+    oneOf: Schema.optionalKey(Schema.NullOr(Schema.Array(OmpEnumChoice))),
+    enum: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+  }),
+  Schema.Struct({ ...OmpPropertyMetadata, type: Schema.Literals(["number", "integer"]) }),
+  Schema.Struct({ ...OmpPropertyMetadata, type: Schema.Literal("boolean") }),
+  Schema.Struct({
+    ...OmpPropertyMetadata,
+    type: Schema.Literal("array"),
+    items: Schema.Union([
+      Schema.Struct({ type: Schema.Literal("string"), enum: Schema.Array(Schema.String) }),
+      Schema.Struct({ anyOf: Schema.Array(OmpEnumChoice) }),
+    ]),
+  }),
+]);
+type OmpElicitationProperty = typeof OmpElicitationProperty.Type;
+const decodeOmpElicitationSchema = Schema.decodeUnknownOption(
+  Schema.Struct({
+    title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    properties: Schema.optionalKey(Schema.Record(Schema.String, OmpElicitationProperty)),
+  }),
+);
+
 export interface OmpElicitationQuestion {
   readonly key: string;
   readonly otherKey?: string;
-  readonly schema: EffectAcpSchema.ElicitationPropertySchema;
-  readonly question: UserInputQuestion;
+  readonly schema: OmpElicitationProperty;
+  readonly question: OrchestrationV2UserInputQuestion;
 }
 
 const CUSTOM_ANSWER_OPTION = {
@@ -198,7 +229,7 @@ const CUSTOM_ANSWER_OPTION = {
 } as const;
 
 function enumChoices(
-  schema: EffectAcpSchema.ElicitationPropertySchema,
+  schema: OmpElicitationProperty,
 ): ReadonlyArray<{ readonly value: string; readonly label: string }> {
   if (schema.type === "string") {
     if (schema.oneOf && schema.oneOf.length > 0) {
@@ -212,10 +243,13 @@ function enumChoices(
     : schema.items.enum.map((value) => ({ value, label: value }));
 }
 
-export function ompElicitationQuestions(
-  request: Extract<EffectAcpSchema.ElicitationRequest, { readonly mode: "form" }>,
-): ReadonlyArray<OmpElicitationQuestion> {
-  const properties = request.requestedSchema.properties ?? {};
+export function ompElicitationQuestions(request: {
+  readonly message: string;
+  readonly requestedSchema: unknown;
+}): ReadonlyArray<OmpElicitationQuestion> {
+  const decoded = decodeOmpElicitationSchema(request.requestedSchema);
+  if (Option.isNone(decoded)) return [];
+  const properties = decoded.value.properties ?? {};
   const entries = Object.entries(properties).filter(([key]) => !key.endsWith("__other"));
   return entries.map(([key, schema], index) => {
     const choices = enumChoices(schema);
@@ -229,12 +263,13 @@ export function ompElicitationQuestions(
           ? choices.map((choice) => ({
               label: choice.label.trim() || choice.value,
               description: choice.label.trim() || choice.value,
+              value: choice.value,
             }))
           : [CUSTOM_ANSWER_OPTION];
     const title = schema.title?.trim();
     const description = schema.description?.trim();
     const header =
-      request.requestedSchema.title?.trim() ||
+      decoded.value.title?.trim() ||
       (description && description.length <= 48 ? description : undefined) ||
       `Question ${index + 1}`;
     return {
@@ -246,6 +281,7 @@ export function ompElicitationQuestions(
         header,
         question: title || request.message.trim() || `Answer question ${index + 1}.`,
         options,
+        allowCustomAnswer: properties[`${key}__other`] !== undefined || choices.length === 0,
         ...(schema.type === "array" ? { multiSelect: true } : {}),
       },
     };
@@ -254,7 +290,7 @@ export function ompElicitationQuestions(
 
 function normalizeElicitationAnswer(
   answer: unknown,
-  schema: EffectAcpSchema.ElicitationPropertySchema,
+  schema: OmpElicitationProperty,
 ): EffectAcpSchema.ElicitationContentValue | undefined {
   if (schema.type === "array") {
     const values = Array.isArray(answer) ? answer : typeof answer === "string" ? [answer] : [];
@@ -456,7 +492,7 @@ const makeOmpAcpRuntimeWithSpawn = (
         ...input,
         spawn,
         authMethodId: "agent",
-        clientCapabilities: OMP_ACP_CLIENT_CAPABILITIES,
+        clientCapabilities: { ...input.clientCapabilities, ...OMP_ACP_CLIENT_CAPABILITIES },
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),

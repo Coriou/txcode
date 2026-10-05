@@ -1,6 +1,6 @@
 import {
   OrchestrationDispatchCommandError,
-  OrchestrationGetSnapshotError,
+  OrchestrationV2GetThreadProjectionError,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
@@ -18,11 +18,11 @@ export function wasBootstrapThreadNotCreated(error: unknown): boolean {
   );
 }
 
-const isOrchestrationGetSnapshotError = Schema.is(OrchestrationGetSnapshotError);
+const isOrchestrationV2GetThreadProjectionError = Schema.is(
+  OrchestrationV2GetThreadProjectionError,
+);
 
-/** Server wording for a subscribeThread miss (`apps/server/src/ws.ts`: `Thread ${threadId} was not found`). */
-const THREAD_NOT_FOUND_MESSAGE = /^Thread .+ was not found$/;
-
+/** Fork: only a server-confirmed projection miss terminates a thread subscription. */
 export function wasSubscribeThreadNotFound(error: unknown): boolean {
-  return isOrchestrationGetSnapshotError(error) && THREAD_NOT_FOUND_MESSAGE.test(error.message);
+  return isOrchestrationV2GetThreadProjectionError(error) && error.reason === "not-found";
 }

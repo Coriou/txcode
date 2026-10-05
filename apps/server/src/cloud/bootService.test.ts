@@ -29,7 +29,7 @@ const linuxPlan = {
   program: [linuxRuntime, "__service-launcher"],
   baseDir: "/home/theo/.t3",
   logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
-  unitPath: "/home/theo/.config/systemd/user/t3code.service",
+  unitPath: "/home/theo/.config/systemd/user/txcode.service",
 };
 
 it("runs the pinned runtime's own executable as the systemd launcher", () => {
@@ -45,7 +45,7 @@ it("reads the served T3 home back out of a rendered unit or plist", () => {
     program: [`${baseDir}/runtime/versions/1.2.3/t3`, "__service-launcher"],
     baseDir,
     logPath: `${baseDir}/userdata/logs/boot-service.log`,
-    unitPath: "/home/theo/.config/systemd/user/t3code.service",
+    unitPath: "/home/theo/.config/systemd/user/txcode.service",
   });
 
   expect(
@@ -79,7 +79,7 @@ const macPlan = {
   program: [macRuntime, "__service-launcher"],
   baseDir: "/Users/theo/.t3",
   logPath: "/Users/theo/.t3/userdata/logs/boot-service.log",
-  unitPath: "/Users/theo/Library/LaunchAgents/com.t3tools.t3code.service.plist",
+  unitPath: "/Users/theo/Library/LaunchAgents/net.coriou.txcode.service.plist",
 };
 const macInstallerPath =
   "/opt/homebrew/bin:/Users/theo/.npm-global/bin:/Users/theo/.nvm/versions/node/v22.16.0/bin:/usr/bin:/bin";

@@ -6,7 +6,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
 
 import {
   type ChatAttachment,
@@ -109,9 +109,7 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
         if (content.type !== "text") return Effect.void;
         return Ref.update(outputRef, (current) => current + content.text);
       });
-      yield* runtime.handleElicitation(() =>
-        Effect.succeed({ action: { action: "cancel" as const } }),
-      );
+      yield* runtime.handleElicitation(() => Effect.succeed({ action: "cancel" as const }));
       yield* runtime.handleRequestPermission(() =>
         Effect.succeed({ outcome: { outcome: "cancelled" as const } }),
       );

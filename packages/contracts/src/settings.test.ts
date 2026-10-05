@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
+  migrateLegacyNotificationSettings,
   ClientSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
@@ -19,6 +20,34 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+
+describe("ServerSettings response streaming", () => {
+  it("defaults to paragraph buffering", () => {
+    expect(decodeServerSettings({}).responseStreamingMode).toBe("paragraph");
+  });
+
+  it.each(["turn", "paragraph"])(
+    "round-trips %s as an environment setting and project override",
+    (responseStreamingMode) => {
+      const input = {
+        responseStreamingMode,
+        projectSettingsOverrides: { project: { responseStreamingMode } },
+      };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
+
+  it.each(["token", "unsupported"])("rejects %s in settings snapshots and writes", (mode) => {
+    for (const input of [
+      { responseStreamingMode: mode },
+      { projectSettingsOverrides: { project: { responseStreamingMode: mode } } },
+    ]) {
+      expect(() => decodeServerSettings(input)).toThrow();
+      expect(() => decodeServerSettingsPatch(input)).toThrow();
+    }
+  });
+});
 
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
@@ -301,6 +330,23 @@ describe("ClientSettings diff colors", () => {
   });
 });
 
+describe("ClientSettings chat width", () => {
+  it("keeps the comfortable width for existing settings without a saved width", () => {
+    expect(decodeClientSettings({}).chatWidth).toBe("comfortable");
+  });
+
+  it.each(["comfortable", "wide", "full"])("round-trips the %s width", (chatWidth) => {
+    const settings = decodeClientSettings({ chatWidth });
+    expect(encodeClientSettings(settings).chatWidth).toBe(chatWidth);
+    expect(decodeClientSettingsPatch({ chatWidth }).chatWidth).toBe(chatWidth);
+  });
+
+  it("rejects unsupported widths", () => {
+    expect(() => decodeClientSettings({ chatWidth: "huge" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ chatWidth: "huge" })).toThrow();
+  });
+});
+
 describe("ClientSettings load balancing", () => {
   it("requires opt-in when settings are new or omit load balancing", () => {
     expect(decodeClientSettings({}).loadBalancingEnabled).toBe(false);
@@ -313,6 +359,15 @@ describe("ClientSettings load balancing", () => {
     expect(decodeClientSettingsPatch({ loadBalancingEnabled }).loadBalancingEnabled).toBe(
       loadBalancingEnabled,
     );
+  });
+});
+
+describe("ClientSettings composer context strip", () => {
+  it("defaults to draft-only and accepts a persistent strip preference", () => {
+    expect(decodeClientSettings({}).persistComposerContextStrip).toBe(false);
+    expect(
+      decodeClientSettingsPatch({ persistComposerContextStrip: true }).persistComposerContextStrip,
+    ).toBe(true);
   });
 });
 
@@ -468,6 +523,23 @@ describe("ClientSettings browser recording frame rate", () => {
   it.each([24, 59, 120])("rejects an unsupported frame rate: %s", (frameRate) => {
     expect(() => decodeClientSettings({ browserRecordingFrameRate: frameRate })).toThrow();
     expect(() => decodeClientSettingsPatch({ browserRecordingFrameRate: frameRate })).toThrow();
+  });
+});
+
+describe("ClientSettings recording input overlays", () => {
+  it("defaults both overlays off and accepts independent opt-ins", () => {
+    const settings = decodeClientSettings({});
+    expect(settings.browserRecordingShowKeyPresses).toBe(false);
+    expect(settings.browserRecordingShowMousePresses).toBe(false);
+    expect(
+      decodeClientSettingsPatch({
+        browserRecordingShowKeyPresses: true,
+        browserRecordingShowMousePresses: false,
+      }),
+    ).toMatchObject({
+      browserRecordingShowKeyPresses: true,
+      browserRecordingShowMousePresses: false,
+    });
   });
 });
 
@@ -673,14 +745,6 @@ describe("ClientSettings pull request merge methods", () => {
 });
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
-  it("defaults text generation to Luna at low reasoning effort", () => {
-    expect(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection).toEqual({
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.6-luna",
-      options: [{ id: "reasoningEffort", value: "low" }],
-    });
-  });
-
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
   });
@@ -818,6 +882,27 @@ describe("provider enabled defaults", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
+  it("defaults the thread env mode to inherit and keeps stored values", () => {
+    expect(decodeServerSettings({}).defaultThreadEnvMode).toBeNull();
+    expect(decodeServerSettings({ defaultThreadEnvMode: "worktree" }).defaultThreadEnvMode).toBe(
+      "worktree",
+    );
+    expect(
+      decodeServerSettings({ defaultThreadEnvMode: "remote" }).defaultThreadEnvMode,
+    ).toBeNull();
+    expect(
+      decodeServerSettingsPatch({ defaultThreadEnvMode: null }).defaultThreadEnvMode,
+    ).toBeNull();
+  });
+
+  it("keeps an inherited thread env mode off the wire for older clients", () => {
+    const encode = Schema.encodeSync(ServerSettings);
+    expect("defaultThreadEnvMode" in encode(decodeServerSettings({}))).toBe(false);
+    expect(
+      encode(decodeServerSettings({ defaultThreadEnvMode: "worktree" })).defaultThreadEnvMode,
+    ).toBe("worktree");
+  });
+
   it("defaults start-from-origin on for legacy configs", () => {
     expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
   });
@@ -826,6 +911,51 @@ describe("ServerSettings worktree defaults", () => {
     expect(
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
     ).toBe(false);
+  });
+
+  it("defaults worktree submodules to inherit and tolerates unknown modes", () => {
+    expect(decodeServerSettings({}).worktreeSubmodules).toBeNull();
+    expect(decodeServerSettings({ worktreeSubmodules: "top-level" }).worktreeSubmodules).toBe(
+      "top-level",
+    );
+    expect(decodeServerSettings({ worktreeSubmodules: "shallow" }).worktreeSubmodules).toBeNull();
+    expect(decodeServerSettingsPatch({ worktreeSubmodules: null }).worktreeSubmodules).toBeNull();
+  });
+});
+
+describe("ServerSettings Cursor legacy settings", () => {
+  it("preserves V1 Cursor CLI settings when reading and writing shared settings", () => {
+    const decoded = decodeServerSettings({
+      providers: {
+        cursor: {
+          enabled: true,
+          binaryPath: "cursor-agent",
+          apiEndpoint: "http://127.0.0.1:3774",
+        },
+      },
+    });
+
+    expect(decoded.providers.cursor.enabled).toBe(true);
+    expect(encodeServerSettings(decoded).providers?.cursor).toMatchObject({
+      binaryPath: "cursor-agent",
+      apiEndpoint: "http://127.0.0.1:3774",
+    });
+  });
+
+  it("ignores obsolete Cursor CLI settings in patches", () => {
+    const patch = decodeServerSettingsPatch({
+      providers: {
+        cursor: {
+          enabled: true,
+          binaryPath: "cursor-agent",
+          apiEndpoint: "http://127.0.0.1:3774",
+        },
+      },
+    });
+
+    expect(patch.providers?.cursor?.enabled).toBe(true);
+    expect(patch.providers?.cursor).not.toHaveProperty("binaryPath");
+    expect(patch.providers?.cursor).not.toHaveProperty("apiEndpoint");
   });
 });
 
@@ -982,4 +1112,96 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
     decodeDeviceHostSettings({ deviceHosts: [{ ...host, target: "-oProxyCommand=bad" }] }),
   ).toThrow();
   expect(() => decodeDeviceHostSettings({ deviceHosts: [{ ...host, port: 0 }] })).toThrow();
+});
+
+describe("branch naming settings", () => {
+  it("defaults existing settings to the t3code static prefix", () => {
+    expect(decodeServerSettings({})).toMatchObject({
+      branchNamingMode: "static",
+      branchNamePrefix: "t3code",
+      branchNameInstructions: "",
+    });
+  });
+  it.each(["static", "semantic", "custom"])(
+    "round-trips %s and project overrides",
+    (branchNamingMode) => {
+      const naming = {
+        branchNamingMode,
+        branchNamePrefix: "team/",
+        branchNameInstructions: "Include the issue ID.",
+      };
+      const input = { ...naming, projectSettingsOverrides: { project: naming } };
+      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+      expect(decodeServerSettingsPatch(input)).toEqual(input);
+    },
+  );
+});
+
+// Fork-local regression: V1's separate observer ignored the encoded upstream Off.
+describe("notification preference consolidation", () => {
+  const migrate = (raw: unknown) => decodeClientSettings(migrateLegacyNotificationSettings(raw));
+  it("keeps V1 approval-only opt-in without enabling other events or sound", () => {
+    const settings = migrate({ notificationMode: "off", notifyOnApprovalRequested: true });
+    expect(settings.notificationMode).toBe("notifications");
+    expect(settings.notifyOnApprovalRequested).toBe(true);
+    expect(settings.notifyOnTurnCompleted).toBe(false);
+    expect(settings.notifyOnFailure).toBe(false);
+    expect(settings.notifyOnUserInputRequested).toBe(false);
+  });
+  it("keeps fresh and legacy all-off installations silent", () => {
+    expect(migrate({}).notificationMode).toBe("off");
+    expect(migrate({ notifyOnApprovalRequested: false }).notificationMode).toBe("off");
+  });
+  it("keeps existing upstream alerts even when custom toggles defaulted off", () => {
+    const settings = migrate({
+      notificationMode: "notifications",
+      notifyOnApprovalRequested: false,
+    });
+    expect(settings.notificationMode).toBe("notifications");
+    expect(settings.notifyOnApprovalRequested).toBe(true);
+    expect(settings.notifyOnTurnCompleted).toBe(true);
+  });
+  it("combines upstream sound with selected legacy system alerts", () => {
+    const settings = migrate({ notificationMode: "sound", notifyOnApprovalRequested: true });
+    expect(settings.notificationMode).toBe("notifications-and-sound");
+    expect(settings.notifyOnApprovalRequested).toBe(true);
+    expect(settings.notifyOnTurnCompleted).toBe(false);
+  });
+  it("preserves explicit Off across encoding and unrelated saves after migration", () => {
+    const enabled = migrate({ notificationMode: "off", notifyOnApprovalRequested: true });
+    const off = { ...enabled, notificationMode: "off" as const, wordWrap: false };
+    const reloaded = migrate(encodeClientSettings(off));
+    expect(reloaded.notificationPreferencesVersion).toBe(1);
+    expect(reloaded.notificationMode).toBe("off");
+    expect(reloaded.notifyOnApprovalRequested).toBe(true);
+    expect(reloaded.wordWrap).toBe(false);
+  });
+  it("does not convert invalid settings into silent defaults", () => {
+    expect(() => migrate({ notificationPreferencesVersion: 2 })).toThrow();
+    expect(() => migrate({ notificationPreferencesVersion: "1" })).toThrow();
+    expect(() => migrate({ notificationMode: "invalid" })).toThrow();
+    expect(() =>
+      migrate({ notificationMode: "notifications", notificationFocusRule: "invalid" }),
+    ).toThrow();
+    expect(() => migrate({ notifyOnApprovalRequested: "true" })).toThrow();
+  });
+});
+
+it("preserves foreground consent when consolidating mixed V1 observers", () => {
+  const upstreamOnly = decodeClientSettings(
+    migrateLegacyNotificationSettings({
+      notificationMode: "notifications",
+      notifyOnApprovalRequested: false,
+    }),
+  );
+  expect(upstreamOnly.notificationFocusRule).toBe("unfocused");
+  const mixed = decodeClientSettings(
+    migrateLegacyNotificationSettings({
+      notificationMode: "notifications",
+      notifyOnApprovalRequested: true,
+      notificationFocusRule: "always",
+    }),
+  );
+  expect(mixed.notifyOnTurnCompleted).toBe(true);
+  expect(mixed.notificationForegroundKinds).toEqual(["approval-requested"]);
 });

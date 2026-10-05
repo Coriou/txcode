@@ -8,13 +8,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
-  type NotificationFocusRule,
   ProviderDriverKind,
   type ProviderInstanceId,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
+  type ChatWidth,
   type DiffLayout,
   type EnvironmentIdentificationMode,
   MAX_APPEARANCE_CONTRAST,
@@ -43,6 +44,7 @@ import {
   type ResponseStreamingMode,
   MIN_TERMINAL_FONT_SIZE,
   type QuitConfirmationMode,
+  SidebarProjectSortOrder,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -50,6 +52,7 @@ import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+import { IS_NIGHTLY_BUILD, NightlyMobileBetaRow } from "../NightlyMobileBeta";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -86,6 +89,7 @@ import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
+  selectsPlanAgent,
 } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
@@ -97,15 +101,6 @@ import { isMacPlatform } from "../../lib/utils";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -182,15 +177,19 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
   paragraph: "Show finished paragraphs",
-  token: "Token by token (legacy)",
 };
 
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
   turn: "Text appears once the agent finishes its turn.",
   paragraph: "Each paragraph or code block appears as soon as it is complete.",
-  token:
-    "Every token repaints the answer as it arrives. Slower and harder to read. Thinking traces still arrive a paragraph at a time.",
 };
+
+const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string> = {
+  updated_at: "Last user message",
+  created_at: "Created at",
+  manual: "Manual",
+};
+const isSidebarProjectSortOrder = Schema.is(SidebarProjectSortOrder);
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -198,15 +197,17 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
-const NOTIFICATION_FOCUS_RULE_LABELS: Record<NotificationFocusRule, string> = {
-  always: "Always",
-  unfocused: "When unfocused",
-  "unfocused-or-different-thread": "When unfocused or viewing another thread",
+const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
+  comfortable: "Comfortable",
+  wide: "Wide",
+  full: "Full",
 };
+
 const DIFF_LAYOUT_LABELS: Record<DiffLayout, string> = {
   stacked: "Stacked",
   split: "Split",
 };
+
 const QUIT_CONFIRMATION_MODE_LABELS: Record<QuitConfirmationMode, string> = {
   direct: "Direct",
   hold: "Hold",
@@ -269,7 +270,7 @@ function AboutVersionTitle() {
   return (
     <span className="inline-flex items-baseline gap-2">
       <span>Version</span>
-      <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
+      <code className="text-2xs font-medium text-muted-foreground">{APP_VERSION}</code>
     </span>
   );
 }
@@ -282,6 +283,9 @@ function AboutVersionSection() {
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
   const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
+  // Show the beta app links as soon as someone picks Nightly, before the update installs.
+  const showNightlyMobileBeta =
+    IS_NIGHTLY_BUILD || (hasDesktopBridge && selectedUpdateChannel === "nightly");
 
   const handleUpdateChannelChange = useCallback(
     (channel: DesktopUpdateChannel) => {
@@ -502,6 +506,7 @@ function AboutVersionSection() {
           }
         />
       ) : null}
+      {showNightlyMobileBeta ? <NightlyMobileBetaRow /> : null}
     </>
   );
 }
@@ -537,6 +542,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
         ? ["Diff colors"]
         : []),
+      ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
       ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
         ? ["Panel animations"]
         : []),
@@ -546,6 +552,22 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
+        : []),
+      ...(settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted
+        ? ["Turn completion notifications"]
+        : []),
+      ...(settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure
+        ? ["Failure notifications"]
+        : []),
+      ...(settings.notifyOnApprovalRequested !== DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested
+        ? ["Approval request notifications"]
+        : []),
+      ...(settings.notifyOnUserInputRequested !==
+      DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested
+        ? ["Input request notifications"]
+        : []),
+      ...(settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule
+        ? ["Notification focus rule"]
         : []),
       ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
         ? ["Thread notifications"]
@@ -560,6 +582,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ["Project Grouping"]
         : []),
+      ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
+        ? ["Project order"]
+        : []),
+      ...(settings.sidebarWorkingShelfEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
+        ? ["Working section"]
+        : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ["Auto-settle inactive threads"]
@@ -567,7 +596,17 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
         ? ["Auto-settle merged threads"]
         : []),
+      ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
+        ? ["Auto-resume limited threads"]
+        : []),
+      ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
+        ? ["Snooze limited threads"]
+        : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+      ...(settings.persistComposerContextStrip !==
+      DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
+        ? ["Composer context"]
+        : []),
       ...getChangedTypographySettingLabels(settings),
       ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
         ? ["Default diff file state"]
@@ -629,22 +668,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
       ...getChangedBrowserSettingLabels(settings),
-      ...(settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted
-        ? ["Turn completion notifications"]
-        : []),
-      ...(settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure
-        ? ["Failure notifications"]
-        : []),
-      ...(settings.notifyOnApprovalRequested !== DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested
-        ? ["Approval request notifications"]
-        : []),
-      ...(settings.notifyOnUserInputRequested !==
-      DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested
-        ? ["Input request notifications"]
-        : []),
-      ...(settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule
-        ? ["Notification focus rule"]
-        : []),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
@@ -656,10 +679,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserDefaultZoomFactor,
       settings.browserDefaultAppearance,
       settings.browserRecordingFrameRate,
+      settings.browserRecordingShowKeyPresses,
+      settings.browserRecordingShowMousePresses,
       settings.browserLinkTarget,
       settings.browserAutoShowFloatingPreview,
       settings.appearanceContrast,
       settings.diffColorScheme,
+      settings.chatWidth,
       settings.enableAgentBrowserAccess,
       settings.confirmQuit,
       settings.confirmThreadArchive,
@@ -689,22 +715,27 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.glassOpacity,
       settings.panelAnimationDurationMs,
       settings.responseStreamingMode,
+      settings.persistComposerContextStrip,
       settings.enableProviderUpdateChecks,
       settings.continueThreadsAfterServerUpdate,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
+      settings.autoResumeLimitedThreads,
+      settings.snoozeLimitedThreads,
       settings.sidebarProjectGroupingMode,
+      settings.sidebarProjectSortOrder,
+      settings.sidebarWorkingShelfEnabled,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
-      settings.notificationMode,
-      settings.inAppNotificationsEnabled,
-      settings.wordWrap,
       settings.notifyOnTurnCompleted,
       settings.notifyOnFailure,
       settings.notifyOnApprovalRequested,
       settings.notifyOnUserInputRequested,
       settings.notificationFocusRule,
+      settings.notificationMode,
+      settings.inAppNotificationsEnabled,
+      settings.wordWrap,
       followSystem,
       theme,
       themeHalves,
@@ -776,10 +807,18 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
+      chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      notifyOnTurnCompleted: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted,
+      notifyOnFailure: DEFAULT_UNIFIED_SETTINGS.notifyOnFailure,
+      notifyOnApprovalRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested,
+      notifyOnUserInputRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested,
+      notificationFocusRule: DEFAULT_UNIFIED_SETTINGS.notificationFocusRule,
+      notificationForegroundKinds: DEFAULT_UNIFIED_SETTINGS.notificationForegroundKinds,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
@@ -795,8 +834,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+      sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
+      sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
+      autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
@@ -824,17 +867,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       browserDefaultZoomFactor: DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor,
       browserDefaultAppearance: DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance,
       browserRecordingFrameRate: DEFAULT_UNIFIED_SETTINGS.browserRecordingFrameRate,
+      browserRecordingShowKeyPresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowKeyPresses,
+      browserRecordingShowMousePresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowMousePresses,
       browserLinkTarget: DEFAULT_UNIFIED_SETTINGS.browserLinkTarget,
       browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
       // Re-granted like any other default. The confirmation dialog lists it by
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
-      notifyOnTurnCompleted: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted,
-      notifyOnFailure: DEFAULT_UNIFIED_SETTINGS.notifyOnFailure,
-      notifyOnApprovalRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested,
-      notifyOnUserInputRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested,
-      notificationFocusRule: DEFAULT_UNIFIED_SETTINGS.notificationFocusRule,
     });
     onRestored?.();
   }, [
@@ -853,44 +893,6 @@ export function useSettingsRestore(onRestored?: () => void) {
     changedSettingLabels,
     restoreDefaults,
   };
-}
-
-/**
- * Gate in front of the legacy token-by-token mode. The primary action steers
- * the user to paragraph streaming; the legacy path is the quiet option.
- */
-function TokenStreamingWarningDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  onUseParagraphs,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-  onUseParagraphs: () => void;
-}) {
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogPopup className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Token by token is a worse experience</AlertDialogTitle>
-          <AlertDialogDescription>
-            Token streaming repaints the message on every delta. It is slower, harder to read, and
-            costs more CPU on every connected device. This mode stays only for backwards
-            compatibility. Use paragraph streaming instead.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <Button variant="ghost-muted" className="sm:mr-auto" onClick={onConfirm}>
-            Use token by token
-          </Button>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button onClick={onUseParagraphs}>Use paragraphs</Button>
-        </AlertDialogFooter>
-      </AlertDialogPopup>
-    </AlertDialog>
-  );
 }
 
 function BackgroundActivityAdvancedDialog({
@@ -926,7 +928,7 @@ function BackgroundActivityAdvancedDialog({
             Tune the shared power policy and the background intervals that feed it.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-0 px-6 pb-5">
+        <DialogPanel>
           <div className="overflow-hidden rounded-xl border bg-card text-card-foreground">
             <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 space-y-1">
@@ -1364,6 +1366,7 @@ export function AppearanceSettingsPanel() {
             }
           />
         ) : null}
+
         <SettingsRow
           {...searchableSetting("diff-color-scheme")}
           description="Choose colors for additions and deletions, including change counts."
@@ -1395,8 +1398,8 @@ export function AppearanceSettingsPanel() {
                         : "flex shrink-0 gap-1"
                     }
                   >
-                    <span className="size-2 rounded-full bg-[var(--diff-deletion)]" />
-                    <span className="size-2 rounded-full bg-[var(--diff-addition)]" />
+                    <span className="size-2 rounded-full bg-diff-deletion" />
+                    <span className="size-2 rounded-full bg-diff-addition" />
                   </span>
                   <SelectValue>
                     {settings.diffColorScheme === "blue-orange" ? "Blue & orange" : "Red & green"}
@@ -1405,6 +1408,67 @@ export function AppearanceSettingsPanel() {
                 <SelectPopup align="end" alignItemWithTrigger={false}>
                   <SelectItem value="red-green">Red & green (default)</SelectItem>
                   <SelectItem value="blue-orange">Blue & orange</SelectItem>
+                </SelectPopup>
+              </Select>
+            </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("composer-context")}
+          description="Keep branch and worktree controls below the composer after a thread starts."
+          resetAction={
+            settings.persistComposerContextStrip !==
+            DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
+              <SettingResetButton
+                label="composer context"
+                onClick={() =>
+                  updateSettings({
+                    persistComposerContextStrip:
+                      DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.persistComposerContextStrip}
+              onCheckedChange={(checked) =>
+                updateSettings({ persistComposerContextStrip: Boolean(checked) })
+              }
+              aria-label="Keep composer context visible in active threads"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("chat-width")}
+          description="Set how wide messages and the composer can grow on large screens."
+          resetAction={
+            settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? (
+              <SettingResetButton
+                label="chat width"
+                onClick={() => updateSettings({ chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth })}
+              />
+            ) : null
+          }
+          control={
+            <div className="w-full sm:w-40">
+              <Select
+                value={settings.chatWidth}
+                onValueChange={(value) => {
+                  if (value === "comfortable" || value === "wide" || value === "full")
+                    updateSettings({ chatWidth: value });
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Chat width">
+                  <SelectValue>{CHAT_WIDTH_LABELS[settings.chatWidth]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="comfortable">Comfortable (default)</SelectItem>
+                  <SelectItem value="wide">Wide</SelectItem>
+                  <SelectItem value="full">Full</SelectItem>
                 </SelectPopup>
               </Select>
             </div>
@@ -2073,7 +2137,7 @@ function LegacyFeaturesSection() {
     <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-sm font-normal tracking-[-0.005em] text-foreground/70 transition-colors group-hover:text-foreground">
+          <h2 className="text-sm font-normal text-foreground/70 transition-colors group-hover:text-foreground">
             Legacy features
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
@@ -2135,45 +2199,6 @@ export function GeneralSettingsPanel() {
   ] as const;
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const showNotificationsBlockedToast = useCallback(() => {
-    toastManager.add(
-      stackedThreadToast({
-        type: "error",
-        title: "Notifications blocked",
-        description: "Enable notifications for this site in your browser settings.",
-      }),
-    );
-  }, []);
-  // The desktop app owns its OS notification-center access, so the browser
-  // permission flow below runs only on the web. A "denied" answer is final:
-  // browsers ignore repeated requestPermission calls, so the user is pointed
-  // at their browser settings instead and the toggle stays off.
-  const handleNotificationToggle = useCallback(
-    async (
-      patch:
-        | { notifyOnTurnCompleted: boolean }
-        | { notifyOnFailure: boolean }
-        | { notifyOnApprovalRequested: boolean }
-        | { notifyOnUserInputRequested: boolean },
-      enabled: boolean,
-    ) => {
-      if (!isElectron && enabled && typeof window !== "undefined" && "Notification" in window) {
-        if (Notification.permission === "denied") {
-          showNotificationsBlockedToast();
-          return;
-        }
-        if (Notification.permission === "default") {
-          const permission = await Notification.requestPermission();
-          if (permission !== "granted") {
-            showNotificationsBlockedToast();
-            return;
-          }
-        }
-      }
-      updateSettings(patch);
-    },
-    [showNotificationsBlockedToast, updateSettings],
-  );
   const navigate = useNavigate();
   const { scope, environment, connectedEnvironments } = useSettingsScope();
   // The representative environment supplies the provider list for pickers;
@@ -2184,7 +2209,6 @@ export function GeneralSettingsPanel() {
   const isEnvironmentScope = scope.environmentIds.length === 1 && environmentId !== null;
   const hasServerTargets = connectedEnvironments.length > 0;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
-  const [tokenStreamingWarningOpen, setTokenStreamingWarningOpen] = useState(false);
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
@@ -2289,6 +2313,106 @@ export function GeneralSettingsPanel() {
                 });
               }}
               aria-label="Project grouping"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("project-order")}
+          description="Order of projects in the sidebar project picker and command palette."
+          resetAction={
+            settings.sidebarProjectSortOrder !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder ? (
+              <SettingResetButton
+                label="project order"
+                onClick={() =>
+                  updateSettings({
+                    sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarProjectSortOrder}
+              onValueChange={(value) => {
+                if (isSidebarProjectSortOrder(value)) {
+                  updateSettings({ sidebarProjectSortOrder: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Project order">
+                <SelectValue>
+                  {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SidebarProjectSortOrder.literals.map((sortOrder) => (
+                  <SelectItem hideIndicator key={sortOrder} value={sortOrder}>
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("auto-resume-limited-threads")}
+          description="Resume usage-limit stops at the reported reset time. Each thread can cancel its scheduled continuation."
+          settingKeys={["autoResumeLimitedThreads"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["autoResumeLimitedThreads"]}
+              checked={settings.autoResumeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Auto-resume limited threads"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("snooze-limited-threads")}
+          description="Snooze usage-limit stops until the reported reset time. Combine with auto-resume to continue when they wake."
+          settingKeys={["snoozeLimitedThreads"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["snoozeLimitedThreads"]}
+              checked={settings.snoozeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Snooze limited threads"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("working-shelf")}
+          description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
+          resetAction={
+            settings.sidebarWorkingShelfEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled ? (
+              <SettingResetButton
+                label="working section"
+                onClick={() =>
+                  updateSettings({
+                    sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarWorkingShelfEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarWorkingShelfEnabled: Boolean(checked) })
+              }
+              aria-label="Working section (beta)"
             />
           }
         />
@@ -2451,52 +2575,30 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <>
-              <Select
-                value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
-                onValueChange={(value) => {
-                  if (value === "token") {
-                    // The legacy path needs an explicit confirmation.
-                    setTokenStreamingWarningOpen(true);
-                    return;
+            <Select
+              value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
+              onValueChange={(value) => {
+                if (value === "turn" || value === "paragraph") {
+                  updateSettings({ responseStreamingMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
+                <SelectValue>
+                  {(value: ResponseStreamingMode | null) =>
+                    value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
                   }
-                  if (value === "turn" || value === "paragraph") {
-                    updateSettings({ responseStreamingMode: value });
-                  }
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
-                  <SelectValue>
-                    {(value: ResponseStreamingMode | null) =>
-                      value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="turn">
-                    {RESPONSE_STREAMING_MODE_LABELS.turn}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="paragraph">
-                    {RESPONSE_STREAMING_MODE_LABELS.paragraph}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="token">
-                    {RESPONSE_STREAMING_MODE_LABELS.token}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-              <TokenStreamingWarningDialog
-                open={tokenStreamingWarningOpen}
-                onOpenChange={setTokenStreamingWarningOpen}
-                onConfirm={() => {
-                  updateSettings({ responseStreamingMode: "token" });
-                  setTokenStreamingWarningOpen(false);
-                }}
-                onUseParagraphs={() => {
-                  updateSettings({ responseStreamingMode: "paragraph" });
-                  setTokenStreamingWarningOpen(false);
-                }}
-              />
-            </>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="turn">
+                  {RESPONSE_STREAMING_MODE_LABELS.turn}
+                </SelectItem>
+                <SelectItem hideIndicator value="paragraph">
+                  {RESPONSE_STREAMING_MODE_LABELS.paragraph}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow
@@ -2603,7 +2705,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("proactive-panels")}
-          description="Open linked pull requests first. Otherwise, open the working tree diff for changes to at least 3 files or 50 lines."
+          description="Open linked pull requests first. Otherwise, open Changes for edits to at least 3 files or 50 lines."
           resetAction={
             settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled ? (
               <SettingResetButton
@@ -2830,7 +2932,7 @@ export function GeneralSettingsPanel() {
           {...searchableSetting("continue-threads-after-server-update")}
           serverScoped
           settingKeys={["continueThreadsAfterServerUpdate"]}
-          description="Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments. Update older servers first."
+          description="Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments."
           status={
             !supportsRestartContinuation
               ? "All selected connected environments must support restart continuation."
@@ -3179,7 +3281,6 @@ export function GeneralSettingsPanel() {
                   lockedProvider={null}
                   instanceEntries={textGenerationModelInstanceEntries}
                   modelOptionsByInstance={textGenerationModelOptionsByInstance}
-                  triggerVariant="outline"
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                   {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
                   getModelDisabledReason={textGenerationModelDisabledReason}
@@ -3229,8 +3330,9 @@ export function GeneralSettingsPanel() {
                     onPromptChange={() => {}}
                     modelOptions={textGenModelOptions}
                     allowPromptInjectedEffort={false}
-                    planModeEnabled={settings.planModeEnabled}
-                    triggerVariant="outline"
+                    planModeEnabled={
+                      settings.planModeEnabled || selectsPlanAgent(textGenModelOptions)
+                    }
                     triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                     onModelOptionsChange={(nextOptions) => {
                       updateSettings({
@@ -3255,179 +3357,17 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
-      <SettingsSection id="notifications" title="Notifications">
-        <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
-          Desktop notifications come from your operating system's notification center. In the
-          browser, Tx Code asks for notification permission the first time you enable one.
-        </p>
-
-        <SettingsRow
-          {...searchableSetting("notify-turn-completed")}
-          description="Get notified when a thread finishes responding."
-          resetAction={
-            settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted ? (
-              <SettingResetButton
-                label="turn completion notifications"
-                onClick={() =>
-                  updateSettings({
-                    notifyOnTurnCompleted: DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.notifyOnTurnCompleted}
-              onCheckedChange={(checked) =>
-                void handleNotificationToggle({ notifyOnTurnCompleted: Boolean(checked) }, checked)
-              }
-              aria-label="Notify on turn completion"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("notify-failures")}
-          description="Get notified when a thread run fails."
-          resetAction={
-            settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure ? (
-              <SettingResetButton
-                label="failure notifications"
-                onClick={() =>
-                  updateSettings({ notifyOnFailure: DEFAULT_UNIFIED_SETTINGS.notifyOnFailure })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.notifyOnFailure}
-              onCheckedChange={(checked) =>
-                void handleNotificationToggle({ notifyOnFailure: Boolean(checked) }, checked)
-              }
-              aria-label="Notify on failure"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("notify-approval-requests")}
-          description="Get notified when a tool call waits for your approval."
-          resetAction={
-            settings.notifyOnApprovalRequested !==
-            DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested ? (
-              <SettingResetButton
-                label="approval request notifications"
-                onClick={() =>
-                  updateSettings({
-                    notifyOnApprovalRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.notifyOnApprovalRequested}
-              onCheckedChange={(checked) =>
-                void handleNotificationToggle(
-                  { notifyOnApprovalRequested: Boolean(checked) },
-                  checked,
-                )
-              }
-              aria-label="Notify on approval requests"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("notify-input-requests")}
-          description="Get notified when a thread is waiting for your input."
-          resetAction={
-            settings.notifyOnUserInputRequested !==
-            DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested ? (
-              <SettingResetButton
-                label="input request notifications"
-                onClick={() =>
-                  updateSettings({
-                    notifyOnUserInputRequested: DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.notifyOnUserInputRequested}
-              onCheckedChange={(checked) =>
-                void handleNotificationToggle(
-                  { notifyOnUserInputRequested: Boolean(checked) },
-                  checked,
-                )
-              }
-              aria-label="Notify on input requests"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("notification-focus-rule")}
-          description="Choose when notifications may appear: always, only while the app is unfocused, or also while you are viewing a different thread."
-          resetAction={
-            settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule ? (
-              <SettingResetButton
-                label="notification focus rule"
-                onClick={() =>
-                  updateSettings({
-                    notificationFocusRule: DEFAULT_UNIFIED_SETTINGS.notificationFocusRule,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.notificationFocusRule}
-              onValueChange={(value) => {
-                if (
-                  value === "always" ||
-                  value === "unfocused" ||
-                  value === "unfocused-or-different-thread"
-                ) {
-                  updateSettings({ notificationFocusRule: value });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Notification focus rule">
-                <SelectValue>
-                  {NOTIFICATION_FOCUS_RULE_LABELS[settings.notificationFocusRule]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="always">
-                  {NOTIFICATION_FOCUS_RULE_LABELS.always}
-                </SelectItem>
-                <SelectItem hideIndicator value="unfocused">
-                  {NOTIFICATION_FOCUS_RULE_LABELS.unfocused}
-                </SelectItem>
-                <SelectItem hideIndicator value="unfocused-or-different-thread">
-                  {NOTIFICATION_FOCUS_RULE_LABELS["unfocused-or-different-thread"]}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-      </SettingsSection>
-
       <SettingsSection id="about" title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (
-          <SettingsRow
-            title={<AboutVersionTitle />}
-            description="Current version of the application."
-          />
+          <>
+            <SettingsRow
+              title={<AboutVersionTitle />}
+              description="Current version of the application."
+            />
+            {IS_NIGHTLY_BUILD ? <NightlyMobileBetaRow /> : null}
+          </>
         )}
       </SettingsSection>
       <SettingsSection title="Diagnostics">
@@ -3452,7 +3392,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description="Notices for dependencies, assets, and optional tools used by Tx Code."
+          description="Notices for dependencies, assets, and optional tools used by T3 Code."
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}
@@ -3499,10 +3439,7 @@ export function ArchivedThreadsPanel() {
       ),
     );
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.threads.map((thread) => ({
-        ...thread,
-        environmentId,
-      })),
+      snapshot.threads.map((thread) => presentThreadShell(environmentId, thread)),
     );
 
     const archivedProjects = Array.from(projectsByEnvironmentAndId.values());
@@ -3590,7 +3527,7 @@ export function ArchivedThreadsPanel() {
             title={
               <span className="inline-flex items-center gap-2">
                 {isLoadingArchive ? (
-                  <Spinner className="size-3.5 text-muted-foreground" />
+                  <Spinner size="sm" tone="muted" />
                 ) : (
                   <ArchiveIcon className="size-3.5 text-muted-foreground" />
                 )}
