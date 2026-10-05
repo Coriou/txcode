@@ -4,12 +4,12 @@ Tx Code is a community fork of [T3 Code](https://github.com/pingdotgg/t3code), a
 running coding agents on your machine. It stays close to upstream and adds a small set of
 features that are not in T3 Code (yet):
 
-| Feature                         | Status             | Upstream                                               |
-| ------------------------------- | ------------------ | ------------------------------------------------------ |
-| Oh My Pi provider               | Shipped            | Not tracked                                            |
-| Thread notifications            | Shipped here first | [#2373](https://github.com/pingdotgg/t3code/pull/2373) |
-| Cross-environment drift warning | Shipped            | Not tracked                                            |
-| Product analytics (PostHog)     | Disabled           | [#8481](https://github.com/pingdotgg/t3code/pull/8481) |
+| Feature                         | Status                                       | Upstream                                               |
+| ------------------------------- | -------------------------------------------- | ------------------------------------------------------ |
+| Oh My Pi provider               | Shipped                                      | Not tracked                                            |
+| Thread notifications            | Upstream delivery; fork event/focus controls | [Guide](docs/user/notifications.md)                    |
+| Cross-environment drift warning | Shipped                                      | Not tracked                                            |
+| Product analytics (PostHog)     | Disabled                                     | [#8481](https://github.com/pingdotgg/t3code/pull/8481) |
 
 The fork merges `upstream/main` on a rolling basis and prefers upstream over the fork: when a
 feature lands in T3 Code and meets the same bar, it is imported and the fork version dropped.
@@ -73,6 +73,14 @@ winget install T3Tools.T3Code
 brew install --cask t3-code
 ```
 
+#### Debian, Ubuntu (`.deb`)
+
+Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
+
+```bash
+sudo apt install ./T3-Code-*.deb
+```
+
 #### Arch Linux (AUR)
 
 Stable:
@@ -103,6 +111,7 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Project settings](./docs/user/project-settings.md)
+- [Appearance preferences](./docs/user/appearance.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Keeping app and server in sync](./docs/user/updating.md)
 - [Source control integrations](./docs/user/source-control.md)

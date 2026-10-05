@@ -1,6 +1,15 @@
-import { ClientSettingsSchema, type ClientSettings } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import {
+  ClientSettingsSchema,
+  migrateLegacyNotificationSettings,
+  type ClientSettings,
+} from "@t3tools/contracts";
 
-import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+import {
+  getLocalStorageItem,
+  setLocalStorageItem,
+  LocalStorageOperationError,
+} from "./hooks/useLocalStorage";
 
 const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 
@@ -13,7 +22,17 @@ export function readBrowserClientSettings(): ClientSettings | null {
     return null;
   }
 
-  return getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, ClientSettingsSchema);
+  const raw = getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, Schema.Unknown);
+  if (raw === null) return null;
+  try {
+    return Schema.decodeUnknownSync(ClientSettingsSchema)(migrateLegacyNotificationSettings(raw));
+  } catch (cause) {
+    throw new LocalStorageOperationError({
+      operation: "decode",
+      storageKey: CLIENT_SETTINGS_STORAGE_KEY,
+      cause,
+    });
+  }
 }
 
 export function writeBrowserClientSettings(settings: ClientSettings): void {

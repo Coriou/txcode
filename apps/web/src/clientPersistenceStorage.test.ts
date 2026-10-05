@@ -142,3 +142,23 @@ describe("clientPersistenceStorage", () => {
     expect(readBrowserClientSettings()?.diffLayout).toBe("split");
   });
 });
+
+describe("V1 notification preference persistence", () => {
+  it("imports an encoded V1 opt-in and keeps a subsequent Off after reload", async () => {
+    const testWindow = getTestWindow();
+    const { readBrowserClientSettings, writeBrowserClientSettings } =
+      await import("./clientPersistenceStorage");
+    testWindow.localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({ notificationMode: "off", notifyOnApprovalRequested: true }),
+    );
+    const migrated = readBrowserClientSettings();
+    expect(migrated?.notificationMode).toBe("notifications");
+    expect(migrated?.notifyOnTurnCompleted).toBe(false);
+    expect(migrated).not.toBeNull();
+    writeBrowserClientSettings({ ...migrated!, notificationMode: "off", wordWrap: false });
+    expect(readBrowserClientSettings()?.notificationMode).toBe("off");
+    expect(readBrowserClientSettings()?.notifyOnApprovalRequested).toBe(true);
+    expect(readBrowserClientSettings()?.wordWrap).toBe(false);
+  });
+});
