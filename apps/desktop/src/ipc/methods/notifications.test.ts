@@ -85,9 +85,9 @@ function makeHarness(
   return { layer, shown, clicks, revealed, created, sent, windows };
 }
 
-async function runClick(click: Effect.Effect<void> | undefined): Promise<void> {
+function runClick(click: Effect.Effect<void> | undefined): Effect.Effect<void> {
   assert.isDefined(click);
-  await Effect.runPromise(click);
+  return click;
 }
 
 describe("showThreadNotification", () => {
@@ -103,7 +103,7 @@ describe("showThreadNotification", () => {
         })
         .pipe(Effect.provide(harness.layer));
 
-      assert.isUndefined(result);
+      assert.isTrue(result);
       assert.deepStrictEqual(harness.shown, [{ title: "Thread 1", body: "Turn completed" }]);
       assert.deepStrictEqual(harness.sent, []);
     }),
@@ -136,7 +136,7 @@ describe("showThreadNotification", () => {
         })
         .pipe(Effect.provide(harness.layer));
 
-      assert.isUndefined(result);
+      assert.isFalse(result);
       assert.deepStrictEqual(harness.shown, []);
     }),
   );
@@ -158,7 +158,7 @@ describe("showThreadNotification", () => {
         .pipe(Effect.provide(harness.layer));
 
       assert.strictEqual(harness.clicks.length, 1);
-      yield* Effect.promise(() => runClick(harness.clicks[0]));
+      yield* runClick(harness.clicks[0]);
 
       assert.deepStrictEqual(harness.revealed, [mainWindow]);
       assert.strictEqual(harness.created.length, 0);
@@ -185,7 +185,7 @@ describe("showThreadNotification", () => {
         .pipe(Effect.provide(harness.layer));
 
       assert.strictEqual(harness.clicks.length, 1);
-      yield* Effect.promise(() => runClick(harness.clicks[0]));
+      yield* runClick(harness.clicks[0]);
 
       assert.strictEqual(harness.created.length, 1);
       const createdWindow = harness.created.at(0);
@@ -212,7 +212,7 @@ describe("showThreadNotification", () => {
         .pipe(Effect.provide(harness.layer));
 
       assert.strictEqual(harness.clicks.length, 1);
-      yield* Effect.promise(() => runClick(harness.clicks[0]));
+      yield* runClick(harness.clicks[0]);
 
       assert.strictEqual(harness.created.length, 1);
       assert.deepStrictEqual(harness.sent, []);

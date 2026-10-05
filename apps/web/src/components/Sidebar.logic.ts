@@ -1186,7 +1186,7 @@ export function resolveThreadStatusPill(input: {
       label: streamLive ? "Working" : "Reconnecting",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
+      pulse: streamLive,
     };
   }
 

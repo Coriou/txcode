@@ -34,6 +34,7 @@ vi.mock("../hooks/useSettings", () => ({
     ...DEFAULT_CLIENT_SETTINGS,
     notificationFocusRule: "unfocused",
     notificationMode: state.mode,
+    inAppNotificationsEnabled: state.inApp,
   }),
 }));
 vi.mock("../threadNotifications", async (importOriginal) => ({

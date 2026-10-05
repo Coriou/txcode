@@ -1240,7 +1240,8 @@ export interface DesktopBridge {
   /** Present when the desktop shell can perform an ordered plain-text paste. */
   pasteAsText?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
-  showThreadNotification: (input: ShowThreadNotificationInput) => Promise<void>;
+  /** False means unsupported; older desktop builds return void on success. */
+  showThreadNotification: (input: ShowThreadNotificationInput) => Promise<boolean | void>;
   /** Optional: older desktop builds cannot dismiss a native alert by tag. */
   closeThreadNotification?: (tag: string) => Promise<void>;
   onThreadNotificationActivate: (listener: (ref: ScopedThreadRef) => void) => () => void;

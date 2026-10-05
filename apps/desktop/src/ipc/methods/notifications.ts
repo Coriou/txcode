@@ -10,11 +10,11 @@ import * as DesktopIpc from "../DesktopIpc.ts";
 export const showThreadNotification = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.SHOW_THREAD_NOTIFICATION_CHANNEL,
   payload: ShowThreadNotificationInputSchema,
-  result: Schema.Void,
+  result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.notifications.show")(function* (input) {
     const notifications = yield* ElectronNotifications.ElectronNotifications;
     if (!(yield* notifications.isSupported)) {
-      return;
+      return false;
     }
 
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
@@ -42,6 +42,7 @@ export const showThreadNotification = DesktopIpc.makeIpcMethod({
         );
       }).pipe(Effect.ignore),
     );
+    return true;
   }),
 });
 

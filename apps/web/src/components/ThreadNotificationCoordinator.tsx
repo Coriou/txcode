@@ -60,18 +60,19 @@ export function ThreadNotificationCoordinator() {
       // A superseded handle must never dismiss the replacement through close-by-tag.
       return (delivered: boolean) => {
         const current = pending.current.get(notification.tag);
-        if (current !== undefined && current.notification !== notification) return;
+        if (current !== undefined && current.notification !== notification) return false;
         if (
           delivered &&
           current !== undefined &&
           hasDesktopNotifications(getClientSettings().notificationMode)
         )
-          return;
+          return false;
         notification.close();
         if (current !== undefined) {
           pending.current.delete(notification.tag);
           setNotificationBadge(pending.current.size);
         }
+        return !delivered && current !== undefined;
       };
     },
     [],
@@ -134,17 +135,18 @@ function EnvironmentNotifications({
   onNotification: (
     environmentId: EnvironmentId,
     notification: NotificationHandle,
-  ) => (delivered: boolean) => void;
+  ) => (delivered: boolean) => boolean;
 }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
   const mode = useClientSettings((settings) => settings.notificationMode);
-  const inAppNotificationsEnabled = useClientSettings(
-    (settings) => settings.inAppNotificationsEnabled,
-  );
   const navigate = useNavigate();
   const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
     strict: false,
   });
+  const currentView = useRef({ activeEnvironmentId, activeThreadId });
+  useEffect(() => {
+    currentView.current = { activeEnvironmentId, activeThreadId };
+  }, [activeEnvironmentId, activeThreadId]);
   const previous = useRef(
     new Map<ThreadId, { attention: string | null; completion: number | null }>(),
   );
@@ -224,13 +226,15 @@ function EnvironmentNotifications({
           activeEnvironmentId,
           activeThreadId,
         });
-      if (
-        !deliverSystem &&
-        inAppNotificationsEnabled &&
-        document.visibilityState === "visible" &&
-        document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
-      ) {
+      const showInAppNotification = () => {
+        if (
+          !getClientSettings().inAppNotificationsEnabled ||
+          document.visibilityState !== "visible" ||
+          !document.hasFocus() ||
+          (currentView.current.activeEnvironmentId === environmentId &&
+            currentView.current.activeThreadId === thread.id)
+        )
+          return;
         const toastId = toastManager.add({
           type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
           title,
@@ -259,9 +263,11 @@ function EnvironmentNotifications({
             },
           },
         });
+      };
+      if (!deliverSystem) {
+        showInAppNotification();
         continue;
       }
-      if (!deliverSystem) continue;
       const tag = `${environmentId}:${thread.id}`;
       if (window.desktopBridge?.showThreadNotification) {
         const close = () => {
@@ -276,8 +282,12 @@ function EnvironmentNotifications({
             threadRef: { environmentId, threadId: thread.id },
           })
           .then(
-            () => reconcile(true),
-            () => reconcile(false),
+            (delivered) => {
+              if (reconcile(delivered !== false)) showInAppNotification();
+            },
+            () => {
+              if (reconcile(false)) showInAppNotification();
+            },
           );
         continue;
       }
@@ -297,20 +307,11 @@ function EnvironmentNotifications({
           });
         });
       } catch {
-        // Some browsers expose Notification but reject desktop presentation.
+        showInAppNotification();
       }
     }
     previous.current = next;
-  }, [
-    activeEnvironmentId,
-    activeThreadId,
-    environmentId,
-    inAppNotificationsEnabled,
-    mode,
-    navigate,
-    onNotification,
-    shell,
-  ]);
+  }, [activeEnvironmentId, activeThreadId, environmentId, mode, navigate, onNotification, shell]);
 
   return null;
 }

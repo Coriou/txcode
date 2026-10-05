@@ -11,6 +11,8 @@ import {
   LocalStorageOperationError,
 } from "./hooks/useLocalStorage";
 
+const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
+
 const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 
 function hasWindow(): boolean {
@@ -25,7 +27,7 @@ export function readBrowserClientSettings(): ClientSettings | null {
   const raw = getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, Schema.Unknown);
   if (raw === null) return null;
   try {
-    return Schema.decodeUnknownSync(ClientSettingsSchema)(migrateLegacyNotificationSettings(raw));
+    return decodeClientSettings(migrateLegacyNotificationSettings(raw));
   } catch (cause) {
     throw new LocalStorageOperationError({
       operation: "decode",

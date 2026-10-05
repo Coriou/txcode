@@ -111,6 +111,7 @@ vi.mock("../hooks/useSettings", () => ({
     notificationFocusRule: "unfocused",
     ...state.preferences,
     notificationMode: state.mode,
+    inAppNotificationsEnabled: state.inApp,
   }),
 }));
 vi.mock("../state/environments", () => ({
@@ -506,6 +507,130 @@ describe("native delivery lifecycle", () => {
 });
 
 describe("system delivery availability", () => {
+  it("falls back when a granted browser notification rejects presentation", async () => {
+    state.mode = "notifications";
+    state.preferences = { notificationFocusRule: "always" };
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(
+        function () {
+          throw new Error("browser rejected presentation");
+        },
+        { permission: "granted" },
+      ),
+    );
+    await render();
+    await complete();
+    expect(state.add).toHaveBeenCalledOnce();
+    expect(state.badge).toHaveBeenLastCalledWith(0);
+  });
+
+  it("ignores an older failed native delivery after a same-tag replacement", async () => {
+    state.mode = "notifications";
+    state.preferences = { notificationFocusRule: "always" };
+    const replies: Array<(delivered: boolean) => void> = [];
+    const close = vi.fn(() => Promise.resolve());
+    Object.assign(window, {
+      desktopBridge: {
+        showThreadNotification: vi.fn(
+          () =>
+            new Promise<boolean>((resolve) => {
+              replies.push(resolve);
+            }),
+        ),
+        closeThreadNotification: close,
+      },
+    });
+    await render();
+    await complete();
+    state.completedAt = "2026-09-13T11:00:00.000Z";
+    await render();
+    expect(close).toHaveBeenCalledOnce();
+    await act(() => replies[0]!(false));
+    expect(close).toHaveBeenCalledOnce();
+    expect(state.add).not.toHaveBeenCalled();
+    expect(state.badge).toHaveBeenLastCalledWith(1);
+    await act(() => replies[1]!(true));
+    expect(state.badge).toHaveBeenLastCalledWith(1);
+  });
+
+  it.each([false, "reject", true, undefined] as const)(
+    "falls back only when native delivery fails (%s), accepting legacy void success",
+    async (result) => {
+      state.mode = "notifications";
+      state.preferences = { notificationFocusRule: "always" };
+      const close = vi.fn(() => Promise.resolve());
+      Object.assign(window, {
+        desktopBridge: {
+          showThreadNotification: vi.fn(() =>
+            result === "reject"
+              ? Promise.reject(new Error("native unavailable"))
+              : Promise.resolve(result),
+          ),
+          closeThreadNotification: close,
+        },
+      });
+      await render();
+      await complete();
+      const failed = result === false || result === "reject";
+      expect(state.badge).toHaveBeenLastCalledWith(failed ? 0 : 1);
+      expect(state.add).toHaveBeenCalledTimes(failed ? 1 : 0);
+      expect(close).toHaveBeenCalledTimes(failed ? 1 : 0);
+      expect(state.notification).not.toHaveBeenCalled();
+      if (failed) {
+        const toast = state.add.mock.calls[0]?.[0];
+        expect(toast?.title).toBe("Thread completed");
+        toast?.actionProps.onClick();
+        expect(state.navigate).toHaveBeenCalledWith({
+          to: "/$environmentId/$threadId",
+          params: { environmentId: "env-1", threadId: "thread-1" },
+        });
+      }
+    },
+  );
+
+  it.each(["current-thread", "in-app-off", "focus-cleanup", "off", "unmount"] as const)(
+    "does not replay an in-app fallback after %s while native delivery is pending",
+    async (change) => {
+      state.mode = "notifications";
+      state.preferences = { notificationFocusRule: "always" };
+      let reply!: (delivered: boolean) => void;
+      Object.assign(window, {
+        desktopBridge: {
+          showThreadNotification: vi.fn(
+            () =>
+              new Promise<boolean>((resolve) => {
+                reply = resolve;
+              }),
+          ),
+          closeThreadNotification: vi.fn(() => Promise.resolve()),
+        },
+      });
+      await render();
+      await complete();
+      if (change === "current-thread") {
+        state.active = { environmentId: "env-1", threadId: "thread-1" };
+        await render();
+      } else if (change === "in-app-off") {
+        state.inApp = false;
+        await render();
+      } else if (change === "focus-cleanup") {
+        await act(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+      } else if (change === "off") {
+        state.mode = "off";
+        await render();
+      } else {
+        await act(() => renderer?.unmount());
+        renderer = undefined;
+      }
+      await act(() => reply(false));
+      expect(state.add).not.toHaveBeenCalled();
+      expect(state.badge).toHaveBeenLastCalledWith(0);
+    },
+  );
+
   it.each(["denied", "default", "unavailable"] as const)(
     "keeps the foreground in-app fallback when browser delivery is %s",
     async (permission) => {

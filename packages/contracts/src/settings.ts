@@ -299,6 +299,7 @@ export const NotificationFocusRule = Schema.Literals([
   "unfocused-or-different-thread",
 ]);
 export type NotificationFocusRule = typeof NotificationFocusRule.Type;
+const isNotificationFocusRule = Schema.is(NotificationFocusRule);
 export const DEFAULT_NOTIFICATION_FOCUS_RULE: NotificationFocusRule =
   "unfocused-or-different-thread";
 
@@ -554,7 +555,7 @@ export function migrateLegacyNotificationSettings(input: unknown): unknown {
     if (
       !legacyEnabled &&
       (raw.notificationFocusRule === undefined ||
-        Schema.is(NotificationFocusRule)(raw.notificationFocusRule))
+        isNotificationFocusRule(raw.notificationFocusRule))
     )
       migrated.notificationFocusRule = "unfocused";
     else
