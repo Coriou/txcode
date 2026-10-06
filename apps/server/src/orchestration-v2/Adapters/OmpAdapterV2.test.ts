@@ -27,14 +27,14 @@ import * as Stream from "effect/Stream";
 import * as Result from "effect/Result";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as EventStore from "../EventStore.ts";
 import * as EventSink from "../EventSink.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as LegacyImporter from "../legacy/LegacyV1ThreadImporter.ts";
 import { shouldPrepareLegacyImportHandoff } from "../Orchestrator.ts";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as IdAllocator from "../IdAllocator.ts";
@@ -548,9 +548,9 @@ describe("OMP V2 native ACP parity", () => {
 });
 
 const migrationStores = Layer.mergeAll(
-  SqlitePersistenceMemory,
-  EventStore.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-  ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+  SqlitePersistence.layerMemory,
+  EventStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+  ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
 );
 const migrationSink = EventSink.layer.pipe(Layer.provide(migrationStores));
 const migrationLayer = Layer.mergeAll(
