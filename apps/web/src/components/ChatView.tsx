@@ -11612,6 +11612,8 @@ export default function ChatView(props: ChatViewProps) {
         <RightPanelTabs
           mode="inline"
           open={rightPanelOpen}
+          keybindings={keybindings}
+          getShortcutContext={getShortcutContext}
           maximized={rightPanelMaximized}
           inlineSize={previewPanelInlineSize}
           surfaces={renderedRightPanelSurfaces}
@@ -11659,6 +11661,9 @@ export default function ChatView(props: ChatViewProps) {
         >
           <RightPanelTabs
             mode="sheet"
+            open={rightPanelOpen}
+            keybindings={keybindings}
+            getShortcutContext={getShortcutContext}
             inlineSize={previewPanelInlineSize}
             // Same effective inset as the closed-state titlebar controls
             // (pr-3 in the tab bar plus this pixel equals the absolute
