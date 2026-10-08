@@ -31,7 +31,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EventSink from "../EventSink.ts";
-import { randomUuidV4 } from "../RandomUuid.ts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { ompLegacyProviderThread } from "./OmpLegacyResume.ts";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";

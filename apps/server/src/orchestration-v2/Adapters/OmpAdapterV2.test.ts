@@ -36,12 +36,12 @@ import * as LegacyImporter from "../legacy/LegacyV1ThreadImporter.ts";
 import { shouldPrepareLegacyImportHandoff } from "../Orchestrator.ts";
 import { ChildProcessSpawner } from "effect/process";
 import * as ServerConfig from "../../config.ts";
-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import * as IdAllocator from "../IdAllocator.ts";
+import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2TurnInput,
-} from "../ProviderAdapter.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
 import { makeOmpAdapterV2 } from "./OmpAdapterV2.ts";
 import { parseOmpResume, selectOmpPermissionOptionId } from "../../provider/acp/OmpAcpSupport.ts";
 

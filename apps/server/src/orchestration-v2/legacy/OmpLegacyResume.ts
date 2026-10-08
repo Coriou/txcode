@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { deriveProviderThread } from "../IdAllocator.ts";
+import { deriveProviderThread } from "@t3tools/provider-core/server/IdAllocator";
 
 const decodeBinding = Schema.decodeUnknownOption(
   Schema.Struct({

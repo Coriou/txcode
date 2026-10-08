@@ -24,9 +24,9 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
   type ServerProviderDraft,
-} from "./providerSnapshot.ts";
-import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
-import { enrichProviderSnapshotWithVersionAdvisory } from "./providerMaintenance.ts";
+} from "@t3tools/provider-core/server/snapshotProbe";
+import type { ProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
+import { enrichProviderSnapshotWithVersionAdvisory } from "@t3tools/provider-core/server/maintenanceResolver";
 import { ompProfileFromLaunchArgs } from "./acp/OmpAcpSupport.ts";
 
 export const OMP_PRESENTATION = {
