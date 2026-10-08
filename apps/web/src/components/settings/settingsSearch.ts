@@ -529,6 +529,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "cli-command",
+    title: "t3 command",
+    to: "/settings/general",
+    searchTerms: ["cli terminal shell path install command line"],
+    desktopOnly: true,
+  },
+  {
     id: "privacy-policy",
     title: "Privacy policy",
     to: "/settings/general",
