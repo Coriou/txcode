@@ -10,7 +10,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import * as Schema from "effect/Schema";
@@ -19,13 +19,13 @@ import * as Predicate from "effect/Predicate";
 import { getProviderOptionStringSelectionValue } from "@t3tools/shared/model";
 import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 
-import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   type AcpSessionMode,
   type AcpSessionModeState,
   type AcpPermissionRequest,
   collectSessionConfigOptionValues,
-} from "./AcpRuntimeModel.ts";
+} from "@t3tools/provider-acp/server/runtimeModel";
 
 export const OMP_RESUME_VERSION = 1 as const;
 const ACP_PLAN_MODE_ALIASES = ["plan", "architect"];

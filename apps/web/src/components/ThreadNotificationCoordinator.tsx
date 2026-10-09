@@ -3,7 +3,7 @@ import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
   CircleAlertIcon,
@@ -127,6 +127,12 @@ export function ThreadNotificationCoordinator() {
   ));
 }
 
+interface NotificationState {
+  readonly raw: OrchestrationV2ThreadShell;
+  readonly attention: string | null;
+  readonly completion: number | null;
+}
+
 function EnvironmentNotifications({
   environmentId,
   onNotification,
@@ -138,6 +144,10 @@ function EnvironmentNotifications({
   ) => (delivered: boolean) => boolean;
 }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
+  // The shell reducer keeps the thread list and unchanged thread objects
+  // stable, so this only rescans when a thread actually changed.
+  const threads =
+    shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value.threads : null;
   const mode = useClientSettings((settings) => settings.notificationMode);
   const navigate = useNavigate();
   const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
@@ -147,22 +157,25 @@ function EnvironmentNotifications({
   useEffect(() => {
     currentView.current = { activeEnvironmentId, activeThreadId };
   }, [activeEnvironmentId, activeThreadId]);
-  const previous = useRef(
-    new Map<ThreadId, { attention: string | null; completion: number | null }>(),
-  );
+  const previous = useRef(new Map<ThreadId, NotificationState>());
 
   useEffect(() => {
-    if (shell.status !== "live" || Option.isNone(shell.snapshot)) {
+    if (threads === null) {
       previous.current.clear();
       return;
     }
-    const next = new Map<ThreadId, { attention: string | null; completion: number | null }>();
-    for (const rawThread of shell.snapshot.value.threads) {
+    const next = new Map<ThreadId, NotificationState>();
+    for (const rawThread of threads) {
       if (rawThread.lineage.relationshipToParent === "subagent") continue;
+      const prior = previous.current.get(rawThread.id);
+      // The same object cannot produce a new notification.
+      if (prior?.raw === rawThread) {
+        next.set(rawThread.id, prior);
+        continue;
+      }
       const thread = presentThreadShell(environmentId, rawThread);
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
-      const prior = previous.current.get(thread.id);
       const attention =
         status === "input" || status === "approval" || status === "failed" || status === "limited"
           ? `${thread.latestRun?.runId ?? ""}:${status}`
@@ -175,7 +188,7 @@ function EnvironmentNotifications({
         Number.isFinite(completedAt)
           ? completedAt
           : (prior?.completion ?? null);
-      next.set(thread.id, { attention, completion });
+      next.set(thread.id, { raw: rawThread, attention, completion });
       if (
         !prior ||
         thread.archivedAt !== null ||
@@ -311,7 +324,7 @@ function EnvironmentNotifications({
       }
     }
     previous.current = next;
-  }, [activeEnvironmentId, activeThreadId, environmentId, mode, navigate, onNotification, shell]);
+  }, [activeEnvironmentId, activeThreadId, environmentId, mode, navigate, onNotification, threads]);
 
   return null;
 }

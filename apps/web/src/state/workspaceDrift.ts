@@ -6,7 +6,7 @@ import {
   type WorkspaceDriftVerdict,
 } from "@t3tools/client-runtime/state/workspace-drift";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
 import { vcsEnvironment } from "./vcs";

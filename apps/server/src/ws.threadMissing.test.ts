@@ -4,8 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
-import * as OrchestrationEventStore from "./persistence/Services/OrchestrationEventStore.ts";
+import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import { OrchestratorProjectionError } from "./orchestration-v2/Orchestrator.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
@@ -32,7 +32,7 @@ const services = Layer.unwrap(
     });
   }),
 ).pipe(
-  Layer.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistenceMemory))),
+  Layer.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
   Layer.merge(Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({})),
 );
 
