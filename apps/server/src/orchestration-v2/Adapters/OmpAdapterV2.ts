@@ -2,15 +2,14 @@
 import { OmpSettings, ProviderDriverKind } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
-import * as Crypto from "effect/Crypto";
+import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
+import type * as FileSystem from "effect/FileSystem";
+import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 import * as AcpErrors from "effect-acp/errors";
 
-import * as ServerConfig from "../../config.ts";
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
 import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
 import {
@@ -29,7 +28,8 @@ import {
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import type * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import type * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   ProviderAdapterDriverCreateError,
@@ -168,9 +168,21 @@ export function makeOmpAcpAdapterFlavor(options: OmpAdapterV2Options): AcpAdapte
   };
 }
 
-export function makeOmpAdapterV2(options: OmpAdapterV2Options) {
-  return makeAcpAdapterV2({ ...options, flavor: makeOmpAcpAdapterFlavor(options) });
-}
+export const makeOmpAdapterV2 = Effect.fn("makeOmpAdapterV2")(function* (
+  options: OmpAdapterV2Options,
+) {
+  return yield* makeAcpAdapterV2({
+    instanceId: options.instanceId,
+    flavor: makeOmpAcpAdapterFlavor(options),
+    selfInvocation: options.selfInvocation,
+    ...(options.clientTerminals === undefined ? {} : { clientTerminals: options.clientTerminals }),
+    ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
+    ...(options.continuationRequests === undefined
+      ? {}
+      : { continuationRequests: options.continuationRequests }),
+    ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
+  });
+});
 
 export type OmpAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -179,7 +191,7 @@ export type OmpAdapterV2DriverEnv =
   | Path.Path
   | IdAllocator.IdAllocatorV2
   | ProviderEventLoggers.ProviderEventLoggers
-  | ServerConfig.ServerConfig;
+  | ProviderHost.ProviderHost;
 
 export const OmpAdapterV2Driver: ProviderAdapterDriver<OmpSettings, OmpAdapterV2DriverEnv> = {
   driverKind: OMP_PROVIDER,
@@ -190,15 +202,11 @@ export const OmpAdapterV2Driver: ProviderAdapterDriver<OmpSettings, OmpAdapterV2
       const hostEnvironment = yield* HostProcessEnvironment;
       const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-      return makeOmpAdapterV2({
+      return yield* makeOmpAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
         environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
-        crypto: yield* Crypto.Crypto,
-        fileSystem: yield* FileSystem.FileSystem,
-        idAllocator: yield* IdAllocator.IdAllocatorV2,
-        serverConfig: yield* ServerConfig.ServerConfig,
         selfInvocation: yield* resolveSelfInvocation(),
         nativeLogging: (threadId) =>
           makeNativeLogger({

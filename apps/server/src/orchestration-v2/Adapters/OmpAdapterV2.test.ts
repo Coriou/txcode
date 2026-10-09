@@ -17,7 +17,6 @@ import {
   type OrchestrationV2ProviderThread,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -36,6 +35,7 @@ import * as LegacyImporter from "../legacy/LegacyV1ThreadImporter.ts";
 import { shouldPrepareLegacyImportHandoff } from "../Orchestrator.ts";
 import { ChildProcessSpawner } from "effect/process";
 import * as ServerConfig from "../../config.ts";
+import { layerTestProviderHost } from "@t3tools/provider-testing/host";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
@@ -48,6 +48,7 @@ import { parseOmpResume, selectOmpPermissionOptionId } from "../../provider/acp/
 const layer = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
+  layerTestProviderHost().pipe(Layer.provide(NodeServices.layer)),
   ServerConfig.layerTest(process.cwd(), { prefix: "omp-v2-test-" }).pipe(
     Layer.provide(NodeServices.layer),
   ),
@@ -71,15 +72,11 @@ exec ${quote(process.execPath)} ${quote(fixture)} "$@"
 `,
   );
   yield* fs.chmod(wrapper, 0o755);
-  const adapter = makeOmpAdapterV2({
+  const adapter = yield* makeOmpAdapterV2({
     instanceId,
     settings: { ...settings, binaryPath: wrapper, launchArgs: "--profile test --yolo" },
     environment: { OMP_WIRE_LOG: logPath, ...environment },
     childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
-    crypto: yield* Crypto.Crypto,
-    fileSystem: fs,
-    idAllocator: yield* IdAllocator.IdAllocatorV2,
-    serverConfig: yield* ServerConfig.ServerConfig,
     selfInvocation: yield* resolveSelfInvocation(),
   });
   const readLog = fs.readFileString(logPath).pipe(
