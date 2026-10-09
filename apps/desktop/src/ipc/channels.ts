@@ -112,6 +112,7 @@ export const PREVIEW_POINTER_EVENT_CHANNEL = "desktop:preview-pointer-event";
 export const SHOW_THREAD_NOTIFICATION_CHANNEL = "desktop:show-thread-notification";
 export const CLOSE_THREAD_NOTIFICATION_CHANNEL = "desktop:close-thread-notification";
 export const THREAD_NOTIFICATION_ACTIVATE_CHANNEL = "desktop:thread-notification-activate";
+export const PREVIEW_OPEN_LINK_CHANNEL = "desktop:preview-open-link";
 
 export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
 

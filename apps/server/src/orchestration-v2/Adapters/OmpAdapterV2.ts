@@ -11,12 +11,12 @@ import { ChildProcessSpawner } from "effect/process";
 import * as AcpErrors from "effect-acp/errors";
 
 import * as ServerConfig from "../../config.ts";
-import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
-import { acpPermissionDisposition } from "../../provider/acp/AcpClientPolicy.ts";
+import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
+import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
 import {
   acpContentBlockDisplayText,
   parsePermissionRequest,
-} from "../../provider/acp/AcpRuntimeModel.ts";
+} from "@t3tools/provider-acp/server/runtimeModel";
 import {
   applyOmpRequestedSessionConfiguration,
   buildOmpElicitationContent,
@@ -26,7 +26,7 @@ import {
   selectOmpPermissionOptionId,
   shouldAutoApproveOmpPermission,
 } from "../../provider/acp/OmpAcpSupport.ts";
-import * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -40,7 +40,7 @@ import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,
   type AcpAdapterV2Flavor,
-} from "./AcpAdapterV2.ts";
+} from "@t3tools/provider-acp/server/adapter";
 
 export const OMP_PROVIDER = ProviderDriverKind.make("omp");
 const DEFAULT_OMP_SETTINGS = Schema.decodeSync(OmpSettings)({});
