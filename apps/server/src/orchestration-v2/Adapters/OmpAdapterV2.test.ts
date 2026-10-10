@@ -35,8 +35,8 @@ import * as LegacyImporter from "../legacy/LegacyV1ThreadImporter.ts";
 import { shouldPrepareLegacyImportHandoff } from "../Orchestrator.ts";
 import { ChildProcessSpawner } from "effect/process";
 import * as ServerConfig from "../../config.ts";
-import { layerTestProviderHost } from "@t3tools/provider-testing/host";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   ProviderAdapterV2RuntimePolicy,
@@ -48,7 +48,8 @@ import { parseOmpResume, selectOmpPermissionOptionId } from "../../provider/acp/
 const layer = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
-  layerTestProviderHost().pipe(Layer.provide(NodeServices.layer)),
+  McpProviderSessions.layer,
+  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
   ServerConfig.layerTest(process.cwd(), { prefix: "omp-v2-test-" }).pipe(
     Layer.provide(NodeServices.layer),
   ),
@@ -195,7 +196,8 @@ const response = (log: ReadonlyArray<Record<string, unknown>>, id: string) =>
 describe("OMP V2 native ACP parity", () => {
   it.effect("keeps native prompts and launch policy while projecting assistant output", () =>
     Effect.gen(function* () {
-      McpProviderSession.setMcpProviderSession({
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      yield* mcpSessions.set({
         environmentId: EnvironmentId.make("omp-test-environment"),
         threadId,
         providerSessionId: "omp-test-mcp",
@@ -204,9 +206,7 @@ describe("OMP V2 native ACP parity", () => {
         authorizationHeader: "Bearer omp-fixture-token",
         browserToolsAvailable: false,
       });
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
-      );
+      yield* Effect.addFinalizer(() => mcpSessions.clear(threadId));
       const { runtime, turnInput, readLog } = yield* open();
       yield* runtime.startTurn({
         ...turnInput,

@@ -22,7 +22,7 @@ import {
   checkOmpProviderStatus,
   enrichOmpSnapshot,
 } from "../OmpProvider.ts";
-import { ProviderEventLoggers } from "../ProviderEventLoggers.ts";
+import { ProviderEventLoggers } from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
@@ -103,7 +103,7 @@ export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
