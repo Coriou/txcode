@@ -1,6 +1,6 @@
 // Fork-local: Oh My Pi keeps its native harness; upstream owns ACP orchestration.
 import { OmpSettings, ProviderDriverKind } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -26,9 +26,10 @@ import {
   shouldAutoApproveOmpPermission,
 } from "../../provider/acp/OmpAcpSupport.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
-import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import type * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import type * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
@@ -191,7 +192,8 @@ export type OmpAdapterV2DriverEnv =
   | Path.Path
   | IdAllocator.IdAllocatorV2
   | ProviderEventLoggers.ProviderEventLoggers
-  | ProviderHost.ProviderHost;
+  | ProviderHost.ProviderHost
+  | McpProviderSessions.McpProviderSessions;
 
 export const OmpAdapterV2Driver: ProviderAdapterDriver<OmpSettings, OmpAdapterV2DriverEnv> = {
   driverKind: OMP_PROVIDER,
@@ -199,13 +201,13 @@ export const OmpAdapterV2Driver: ProviderAdapterDriver<OmpSettings, OmpAdapterV2
   defaultConfig: (): OmpSettings => DEFAULT_OMP_SETTINGS,
   create: Effect.fn("OmpAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<OmpSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
       const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
       return yield* makeOmpAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
         nativeLogging: (threadId) =>
