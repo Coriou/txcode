@@ -46,9 +46,9 @@ function threadShowingBrowser(
 }
 
 /**
- * Opens each link the OS hands T3 Code. Prompt and thread links, by `t3code://`
+ * Opens each link the OS hands Tx Code. Prompt and thread links, by `t3code://`
  * or as hosted-app pages, open in the app. Other web links and HTML files arrive
- * because T3 Code is the default browser (macOS): with a browser panel on screen
+ * because Tx Code is the default browser (macOS): with a browser panel on screen
  * the page opens as a new tab there; otherwise it starts a thread without a
  * project, its browser panel maximized.
  */

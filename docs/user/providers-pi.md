@@ -5,8 +5,8 @@ extensions, skills, context files, and native session history.
 
 ## Set Up Pi
 
-1. Install [Pi](https://pi.dev) on the machine running the T3 Code server. Pi requires Node.js
-   22.19 or newer; its platform installers can install Node if needed. T3 Code supports Pi
+1. Install [Pi](https://pi.dev) on the machine running the Tx Code server. Pi requires Node.js
+   22.19 or newer; its platform installers can install Node if needed. Tx Code supports Pi
    0.80.5 or newer.
 2. Run `pi` in a terminal, then `/login` to connect your model provider or configure its API key.
 3. Open T3 Code Settings, enable Pi, and refresh the provider.
