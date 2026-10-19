@@ -184,7 +184,7 @@ describe("DesktopEnvironment", () => {
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({ isPackaged: true });
 
-      assert.equal(environment.branding.stageLabel, "Alpha");
+      assert.equal(environment.branding.stageLabel, "Beta");
       assert.equal(environment.displayName, "Tx Code");
     }),
   );
