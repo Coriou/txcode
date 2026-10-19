@@ -21,7 +21,11 @@ const FONT = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf";
  * Records every command. `fc-match` is missing until fonts are installed, unless
  * the host starts with a font; the browser fails to load libnss3 when asked to.
  */
-const fakeSpawner = (host: { readonly font?: string; readonly missingLibrary?: boolean }) => {
+const fakeSpawner = (host: {
+  readonly font?: string;
+  readonly missingLibrary?: boolean;
+  readonly passwdEntry?: string;
+}) => {
   const commands: Array<ReadonlyArray<string>> = [];
   let font = host.font;
   const spawner = ChildProcessSpawner.make((command) =>
@@ -37,13 +41,15 @@ const fakeSpawner = (host: { readonly font?: string; readonly missingLibrary?: b
         });
       }
       const output =
-        command.command === "fc-match"
-          ? font!
-          : command.command === BROWSER && host.missingLibrary
-            ? "error while loading shared libraries: libnss3.so: cannot open shared object file"
-            : command.command === "ldd"
-              ? "\tlibnss3.so => not found\n"
-              : "";
+        command.command === "getent"
+          ? (host.passwdEntry ?? "")
+          : command.command === "fc-match"
+            ? font!
+            : command.command === BROWSER && host.missingLibrary
+              ? "error while loading shared libraries: libnss3.so: cannot open shared object file"
+              : command.command === "ldd"
+                ? "\tlibnss3.so => not found\n"
+                : "";
       const bytes = Stream.make(new TextEncoder().encode(output));
       return ChildProcessSpawner.makeHandle({
         pid: ChildProcessSpawner.ProcessId(1),
@@ -146,3 +152,35 @@ it.effect("setup as root installs missing libraries and fonts after one package 
     expect(output).toContain("This host is ready for T3's browser.");
   }),
 );
+
+it.effect("sudo setup looks under the invoking user's fork home by default", () => {
+  const directories: string[] = [];
+  const { spawner } = fakeSpawner({
+    font: FONT,
+    passwdEntry: "alice:x:1000:1000:Alice:/home/alice:/bin/bash\n",
+  });
+  return Command.runWith(browserCommand, { version: "0.0.0" })(["setup"]).pipe(
+    Effect.andThen(
+      Effect.sync(() => {
+        expect(directories).toContain("/home/alice/.txcode/tools/chrome-headless-shell");
+        expect(directories.some((path) => path.startsWith("/home/alice/.t3/"))).toBe(false);
+      }),
+    ),
+    Effect.provideService(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        exists: () => Effect.succeed(false),
+        readDirectory: (path) =>
+          Effect.sync(() => {
+            directories.push(path);
+            return [];
+          }),
+      }),
+    ),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.provideService(HostProcess.Platform, "linux"),
+    Effect.provideService(HostProcess.UserId, 0),
+    Effect.provideService(HostProcess.Environment, { SUDO_USER: "alice" }),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, TestConsole.layer)),
+  );
+});
