@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
   computeWorkspaceDrift,
   type WorkspaceDriftMemberStatus,
@@ -17,50 +17,24 @@ export interface WorkspaceDriftWatchedMember {
   readonly workspaceRoot: string;
 }
 
-/**
- * `Atom.family` keys on its argument, and members arrays are usually rebuilt
- * every render, so the members are folded into one string: the derived atom
- * (and therefore the subscription set) stays stable across renders. Workspace
- * roots and entity ids never contain these control characters.
- */
-const MEMBER_FIELD_DELIMITER = "\u0000";
-const MEMBER_DELIMITER = "\u0001";
+type WorkspaceDriftMemberKey = readonly [
+  environmentId: EnvironmentId,
+  projectId: ProjectId,
+  workspaceRoot: string,
+];
 
-const workspaceDriftMembersKey = (members: ReadonlyArray<WorkspaceDriftWatchedMember>): string =>
-  members
-    .map((member) =>
-      [member.environmentId, member.projectId, member.workspaceRoot].join(MEMBER_FIELD_DELIMITER),
-    )
-    .join(MEMBER_DELIMITER);
-
-const parseWorkspaceDriftMembersKey = (key: string): ReadonlyArray<WorkspaceDriftWatchedMember> =>
-  key === ""
-    ? []
-    : key.split(MEMBER_DELIMITER).map((entry) => {
-        const [environmentId = "", projectId = "", workspaceRoot = ""] =
-          entry.split(MEMBER_FIELD_DELIMITER);
-        return {
-          environmentId: EnvironmentId.make(environmentId),
-          projectId: ProjectId.make(projectId),
-          workspaceRoot,
-        };
-      });
-
+// Members arrays are usually rebuilt every render; keying the family by their
+// identifying fields keeps the derived atom (and its subscriptions) stable.
 const workspaceDriftVerdictAtom = Atom.family((membersKey: string) => {
-  const members = parseWorkspaceDriftMembersKey(membersKey);
+  const members = JSON.parse(membersKey) as ReadonlyArray<WorkspaceDriftMemberKey>;
   return Atom.make((get): WorkspaceDriftVerdict | null => {
-    const statuses = members.map((member): WorkspaceDriftMemberStatus => {
-      const result = get(
-        vcsEnvironment.status({
-          environmentId: member.environmentId,
-          input: { cwd: member.workspaceRoot },
-        }),
-      );
+    const statuses = members.map(([environmentId, projectId, workspaceRoot]) => {
+      const result = get(vcsEnvironment.status({ environmentId, input: { cwd: workspaceRoot } }));
       return {
-        environmentId: member.environmentId,
-        projectId: member.projectId,
+        environmentId,
+        projectId,
         status: Option.getOrNull(AsyncResult.value(result)),
-      };
+      } satisfies WorkspaceDriftMemberStatus;
     });
     return statuses.some((member) => member.status === null)
       ? null
@@ -76,7 +50,17 @@ const workspaceDriftVerdictAtom = Atom.family((membersKey: string) => {
 export function useWorkspaceDriftVerdict(
   members: ReadonlyArray<WorkspaceDriftWatchedMember>,
 ): WorkspaceDriftVerdict | null {
-  return useAtomValue(workspaceDriftVerdictAtom(workspaceDriftMembersKey(members)));
+  return useAtomValue(
+    workspaceDriftVerdictAtom(
+      JSON.stringify(
+        members.map((member): WorkspaceDriftMemberKey => [
+          member.environmentId,
+          member.projectId,
+          member.workspaceRoot,
+        ]),
+      ),
+    ),
+  );
 }
 
 const UNKNOWN_PREFERRED_COPY_LABEL = "your preferred copy";

@@ -1,3 +1,4 @@
+import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import { useShellStreamLive } from "../state/shell";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
@@ -60,9 +61,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
-  type EnvironmentId,
   type EnvironmentMachineKind,
-  type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -1665,9 +1664,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     isActive: props.isActive,
     isSelected,
   });
-  // Status hues follow the system-wide convention set by sidebar v1 and the
-  // mobile Live Activity/widgets (amber approval, indigo input, sky working)
-  // so a thread reads the same color everywhere it surfaces.
   const shellStreamLive = useShellStreamLive(thread.environmentId);
   const workingIsDetached = status === "working" && !shellStreamLive;
   const topStatus =
