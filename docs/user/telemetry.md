@@ -1,10 +1,14 @@
 # Product usage data
 
-The Tx Code server sends product usage events to T3 Code's own endpoint at `ingest.t3.codes`,
-associated with a hashed account or installation identifier. The endpoint keeps a copy of each
-event and forwards events to PostHog. Events include the provider, model, reasoning effort,
-permission mode, turn result, duration, release channel, and main-agent token totals when
-available.
+Tx Code ships with product usage collection disabled and no bundled ingestion key. Set
+`T3CODE_TELEMETRY_ENABLED=true` to enable event recording and sending. Delivery to an ingestion
+service also requires configuring its `T3CODE_POSTHOG_KEY`.
+
+When enabled, the server sends events to `T3CODE_POSTHOG_HOST`, which defaults to T3 Code's
+endpoint at `ingest.t3.codes`. That endpoint keeps a copy and forwards events to PostHog.
+Events are associated with a hashed account or installation identifier and include the provider,
+model, reasoning effort, permission mode, turn result, duration, release channel, and main-agent
+token totals when available.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
