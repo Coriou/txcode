@@ -22,6 +22,7 @@ import {
   enrichOmpSnapshot,
 } from "../OmpProvider.ts";
 import { ProviderEventLoggers } from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
@@ -68,6 +69,7 @@ export type OmpDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers
+  | ProviderLatestVersions.ProviderLatestVersions
   | ServerConfig;
 
 const withInstanceIdentity =
@@ -100,6 +102,7 @@ export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
+      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const processEnv = yield* mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -163,9 +166,10 @@ export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
                 maintenanceCapabilities,
                 enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 publishSnapshot,
-                httpClient,
               }),
             ),
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
           ),
       }).pipe(
         Effect.mapError(

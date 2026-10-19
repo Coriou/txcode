@@ -11,12 +11,14 @@ import * as ServerConfig from "../../config.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import { OmpDriver } from "./OmpDriver.ts";
 
 const layerTest = Layer.mergeAll(
   IdAllocator.layer,
   McpProviderSessions.layer,
+  ProviderLatestVersions.layer,
   TestProviderHost.layer({ runBackgroundWork: false }).pipe(Layer.provide(NodeServices.layer)),
   ServerConfig.layerTest(process.cwd(), { prefix: "omp-driver-" }).pipe(
     Layer.provide(NodeServices.layer),

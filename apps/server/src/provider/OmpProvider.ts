@@ -27,6 +27,7 @@ import {
 } from "@t3tools/provider-core/server/snapshotProbe";
 import type { ProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
 import { enrichProviderSnapshotWithVersionAdvisory } from "@t3tools/provider-core/server/maintenanceResolver";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { ompProfileFromLaunchArgs } from "./acp/OmpAcpSupport.ts";
 
 export const OMP_PRESENTATION = {
@@ -501,12 +502,14 @@ export const enrichOmpSnapshot = (input: {
   readonly maintenanceCapabilities: ProviderMaintenanceCapabilities;
   readonly enableProviderUpdateChecks?: boolean;
   readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
-  readonly httpClient: HttpClient.HttpClient;
-}): Effect.Effect<void> =>
+}): Effect.Effect<
+  void,
+  never,
+  HttpClient.HttpClient | ProviderLatestVersions.ProviderLatestVersions
+> =>
   enrichProviderSnapshotWithVersionAdvisory(input.snapshot, input.maintenanceCapabilities, {
     enableProviderUpdateChecks: input.enableProviderUpdateChecks,
   }).pipe(
-    Effect.provideService(HttpClient.HttpClient, input.httpClient),
     Effect.flatMap(input.publishSnapshot),
     Effect.catchCause((cause) =>
       Effect.logWarning("Oh My Pi version advisory enrichment failed", {

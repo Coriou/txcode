@@ -6,7 +6,12 @@ import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ChatAttachment, ProviderInstanceId, OmpSettings } from "@t3tools/contracts";
+import {
+  ChatAttachment,
+  OmpSettings,
+  ProviderInstanceId,
+  TextGenerationError,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -98,6 +103,34 @@ it.layer(OmpTextGenerationTestLayer)("OmpTextGeneration", (it) => {
       ]);
       expect(NodeFS.existsSync(sessionDir!)).toBe(false);
     }).pipe(Effect.scoped),
+  );
+
+  it.effect("fails review guides without starting Oh My Pi", () =>
+    Effect.gen(function* () {
+      const textGeneration = yield* makeOmpTextGeneration(
+        decodeOmpSettings({ binaryPath: "/no/such/omp" }),
+      );
+
+      const error = yield* textGeneration
+        .generateReviewGuide({
+          cwd: process.cwd(),
+          number: 1,
+          title: "Review me",
+          description: "",
+          baseBranch: "main",
+          baseCommit: "0000000000000000000000000000000000000000",
+          settledReview: "",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("omp"),
+            model: "default",
+          },
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(TextGenerationError);
+      expect(error.operation).toBe("generateReviewGuide");
+      expect(error.detail).toContain("Oh My Pi cannot investigate a checkout read-only");
+    }),
   );
 
   it.effect("denies ACP tool permission requests", () =>

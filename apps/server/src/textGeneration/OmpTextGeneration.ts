@@ -8,29 +8,11 @@ import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import {
-  type ChatAttachment,
-  type ModelSelection,
-  type OmpSettings,
-  TextGenerationError,
-} from "@t3tools/contracts";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { type ChatAttachment, type OmpSettings, TextGenerationError } from "@t3tools/contracts";
+import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-} from "@t3tools/provider-core/server/textGenerationPrompts";
-import {
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-} from "@t3tools/provider-core/server/textGenerationUtils";
 import {
   applyOmpAcpModelSelection,
   makeOmpTextGenerationAcpRuntime,
@@ -69,26 +51,9 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
     return parts;
   });
 
-  const runOmpJson = <S extends Schema.Top>({
-    operation,
-    cwd,
-    prompt,
-    outputSchemaJson,
-    modelSelection,
-    attachments,
-  }: {
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle";
-    cwd: string;
-    prompt: string;
-    outputSchemaJson: S;
-    modelSelection: ModelSelection;
-    attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
-    Effect.gen(function* () {
+  const runOmpJson: TextGenerationOperations.Runner = (request) => {
+    const { operation, cwd, prompt, modelSelection, attachments } = request;
+    return Effect.gen(function* () {
       const outputRef = yield* Ref.make("");
       const sessionDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3code-omp-text-session-",
@@ -166,19 +131,7 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
         });
       }
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
-      return yield* decodeOutput(extractJsonObject(rawResult)).pipe(
-        Effect.catchTags({
-          SchemaError: (cause) =>
-            Effect.fail(
-              new TextGenerationError({
-                operation,
-                detail: "Oh My Pi returned invalid structured output.",
-                cause,
-              }),
-            ),
-        }),
-      );
+      return yield* TextGenerationOperations.decodeJsonReply(request, "Oh My Pi", rawResult);
     }).pipe(
       Effect.mapError((cause) =>
         isTextGenerationError(cause)
@@ -191,94 +144,12 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
       ),
       Effect.scoped,
     );
+  };
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("OmpTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-      const generated = yield* runOmpJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("OmpTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-      const generated = yield* runOmpJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-      return { title: sanitizePrTitle(generated.title), body: generated.body.trim() };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("OmpTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
-      const generated = yield* runOmpJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        attachments: input.attachments,
-      });
-      return { branch: sanitizeBranchFragment(generated.branch) };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("OmpTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        attachments: input.attachments,
-      });
-      const generated = yield* runOmpJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-        attachments: input.attachments,
-      });
-      return {
-        title: sanitizeThreadTitle(generated.title),
-      } satisfies TextGeneration.ThreadTitleGenerationResult;
-    });
-
-  return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  // Text generation runs Oh My Pi with `--no-tools`, so it cannot investigate a checkout;
+  // review guides fail with a typed error instead of answering blind.
+  return TextGenerationOperations.fromRunner(
+    "OmpTextGeneration",
+    TextGenerationOperations.withoutInvestigation("Oh My Pi", runOmpJson),
+  );
 });
