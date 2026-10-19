@@ -1669,7 +1669,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const topStatus =
     status === "working"
       ? {
-          // A native /goal keeps the agent going across turns until it is met.
           // A detached shell still reads as Reconnecting, including during a goal.
           label: workingIsDetached
             ? "Reconnecting"
