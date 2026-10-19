@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import {
   computeWorkspaceDrift,
   type WorkspaceDriftMemberStatus,
@@ -7,7 +7,6 @@ import {
 } from "@t3tools/client-runtime/state/workspace-drift";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useMemo } from "react";
 
 import { vcsEnvironment } from "./vcs";
 
@@ -19,44 +18,65 @@ export interface WorkspaceDriftWatchedMember {
 }
 
 /**
+ * `Atom.family` keys on its argument, and members arrays are usually rebuilt
+ * every render, so the members are folded into one string: the derived atom
+ * (and therefore the subscription set) stays stable across renders. Workspace
+ * roots and entity ids never contain these control characters.
+ */
+const MEMBER_FIELD_DELIMITER = "\u0000";
+const MEMBER_DELIMITER = "\u0001";
+
+const workspaceDriftMembersKey = (members: ReadonlyArray<WorkspaceDriftWatchedMember>): string =>
+  members
+    .map((member) =>
+      [member.environmentId, member.projectId, member.workspaceRoot].join(MEMBER_FIELD_DELIMITER),
+    )
+    .join(MEMBER_DELIMITER);
+
+const parseWorkspaceDriftMembersKey = (key: string): ReadonlyArray<WorkspaceDriftWatchedMember> =>
+  key === ""
+    ? []
+    : key.split(MEMBER_DELIMITER).map((entry) => {
+        const [environmentId = "", projectId = "", workspaceRoot = ""] =
+          entry.split(MEMBER_FIELD_DELIMITER);
+        return {
+          environmentId: EnvironmentId.make(environmentId),
+          projectId: ProjectId.make(projectId),
+          workspaceRoot,
+        };
+      });
+
+const workspaceDriftVerdictAtom = Atom.family((membersKey: string) => {
+  const members = parseWorkspaceDriftMembersKey(membersKey);
+  return Atom.make((get): WorkspaceDriftVerdict | null => {
+    const statuses = members.map((member): WorkspaceDriftMemberStatus => {
+      const result = get(
+        vcsEnvironment.status({
+          environmentId: member.environmentId,
+          input: { cwd: member.workspaceRoot },
+        }),
+      );
+      return {
+        environmentId: member.environmentId,
+        projectId: member.projectId,
+        status: Option.getOrNull(AsyncResult.value(result)),
+      };
+    });
+    return statuses.some((member) => member.status === null)
+      ? null
+      : computeWorkspaceDrift(statuses);
+  }).pipe(Atom.withLabel(`web:workspace-drift:${membersKey}`));
+});
+
+/**
  * Cross-environment drift verdict for one logical project group, or null while
  * any member's status has not been observed yet (callers treat null like
  * "unknown" and stay quiet — never warn off partial data).
  */
 export function useWorkspaceDriftVerdict(
-  members: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly projectId: ProjectId;
-    readonly workspaceRoot: string;
-  }>,
+  members: ReadonlyArray<WorkspaceDriftWatchedMember>,
 ): WorkspaceDriftVerdict | null {
-  // Members arrays are usually rebuilt every render; the key keeps the derived
-  // atom (and therefore the subscription set) stable across them.
-  const membersKey = JSON.stringify(members);
-  const verdictAtom = useMemo(
-    () =>
-      Atom.make((get): WorkspaceDriftVerdict | null => {
-        const statuses = members.map((member): WorkspaceDriftMemberStatus => {
-          const result = get(
-            vcsEnvironment.status({
-              environmentId: member.environmentId,
-              input: { cwd: member.workspaceRoot },
-            }),
-          );
-          return {
-            environmentId: member.environmentId,
-            projectId: member.projectId,
-            status: Option.getOrNull(AsyncResult.value(result)),
-          };
-        });
-        return statuses.some((member) => member.status === null)
-          ? null
-          : computeWorkspaceDrift(statuses);
-      }).pipe(Atom.withLabel(`web:workspace-drift:${membersKey}`)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- membersKey fully determines members
-    [membersKey],
-  );
-  return useAtomValue(verdictAtom);
+  return useAtomValue(workspaceDriftVerdictAtom(workspaceDriftMembersKey(members)));
 }
 
 const UNKNOWN_PREFERRED_COPY_LABEL = "your preferred copy";
