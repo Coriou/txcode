@@ -312,7 +312,10 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
                 enabled === undefined ? {} : { T3CODE_TELEMETRY_ENABLED: enabled },
               ),
             ),
-            acceptThenFailClient([]),
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make(() => Effect.die("disabled analytics must not send")),
+            ),
           ),
         ),
         Effect.provideService(HostProcess.Platform, "linux"),

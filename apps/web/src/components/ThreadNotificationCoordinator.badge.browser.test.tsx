@@ -1,5 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
-import { DEFAULT_CLIENT_SETTINGS, EnvironmentId } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS, EnvironmentId, type ClientSettings } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -8,7 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
-  mode: "notifications",
+  mode: "notifications" as ClientSettings["notificationMode"],
   inApp: false,
   toast: vi.fn(),
   shells: null as unknown as { set: (id: string, value: unknown) => void },
@@ -44,10 +44,10 @@ vi.mock(import("../hooks/useSettings"), async (original) => ({
   ...(await original()),
   useClientSettings: ((
     select: (settings: { notificationMode: string; inAppNotificationsEnabled: boolean }) => unknown,
-  ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp }),
+  ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp })) as never,
   getClientSettings: () => ({
     ...DEFAULT_CLIENT_SETTINGS,
-    notificationFocusRule: "unfocused",
+    notificationFocusRule: "unfocused" as const,
     notificationMode: state.mode,
     inAppNotificationsEnabled: state.inApp,
   }),

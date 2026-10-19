@@ -1236,7 +1236,9 @@ function useProjectThreadPanel(input: {
   return {
     hasOverflowingThreads,
     hiddenThreadStatus: resolveProjectStatusIndicator(
-      hiddenThreads.map((thread) => resolveProjectThreadStatus(thread, lastVisitedAtByThreadKey, shellStreamLive)),
+      hiddenThreads.map((thread) =>
+        resolveProjectThreadStatus(thread, lastVisitedAtByThreadKey, shellStreamLive),
+      ),
     ),
     renderedThreads,
     showEmptyThreadState: projectExpanded && visibleProjectThreads.length === 0,

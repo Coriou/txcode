@@ -823,7 +823,7 @@ describe("VcsStatusBroadcaster", () => {
       } satisfies VcsStatusStreamEvent);
       assert.equal(localUpdated.local.refName, initialLocal.refName);
       assert.equal(localUpdated.local.headOid, updatedLocal.headOid);
-    }).pipe(Effect.provide(makeTestLayer(state)));
+    }).pipe(Effect.provide(layerTestFor(state)));
   });
 
   it.effect("loads remote status once when periodic refreshes are disabled", () => {

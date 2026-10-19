@@ -4,6 +4,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   OrchestrationV2GetThreadProjectionError,
   EnvironmentId,
+  ThreadId,
   type RelayClientInstallProgressEvent,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,

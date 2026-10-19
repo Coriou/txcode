@@ -46,7 +46,7 @@ describe("mobile model options", () => {
       ],
     } as unknown as ServerConfig;
 
-    expect(buildModelOptions(config, null)).toMatchObject([
+    expect(buildModelOptions(config, null, undefined, null)).toMatchObject([
       {
         label: "Kimi K2.6",
         providerLabel: "Oh My Pi",

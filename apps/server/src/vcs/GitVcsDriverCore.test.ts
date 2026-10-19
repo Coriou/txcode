@@ -368,7 +368,7 @@ it.effect("reports headOid equal to the real HEAD sha", () =>
     const expectedHeadOid = yield* git(cwd, ["rev-parse", "HEAD"]);
 
     assert.equal(details.headOid, expectedHeadOid);
-  }).pipe(Effect.provide(TestLayer)),
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("omits headOid when HEAD cannot be resolved", () =>
@@ -383,7 +383,7 @@ it.effect("omits headOid when HEAD cannot be resolved", () =>
     assert.isTrue(details.isRepo);
     assert.isUndefined(details.headOid);
     assert.isFalse("headOid" in details);
-  }).pipe(Effect.provide(TestLayer)),
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("re-reads origin remote status after cache TTL expiry and bypassed invalidation", () =>

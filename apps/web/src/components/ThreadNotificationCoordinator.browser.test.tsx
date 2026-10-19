@@ -131,10 +131,10 @@ vi.mock(import("../hooks/useSettings"), async (original) => ({
     select: (
       settings: Pick<ClientSettings, "notificationMode" | "inAppNotificationsEnabled">,
     ) => unknown,
-  ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp }),
+  ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp })) as never,
   getClientSettings: () => ({
     ...DEFAULT_CLIENT_SETTINGS,
-    notificationFocusRule: "unfocused",
+    notificationFocusRule: "unfocused" as const,
     ...state.preferences,
     notificationMode: state.mode,
     inAppNotificationsEnabled: state.inApp,
@@ -160,6 +160,13 @@ vi.mock(import("./ui/toast"), async (original) => {
 import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
 
 let root: Root;
+
+let unmounted = false;
+async function unmount() {
+  if (unmounted) return;
+  await act(() => root.unmount());
+  unmounted = true;
+}
 
 async function render() {
   await act(() => root.render(<ThreadNotificationCoordinator />));
@@ -198,11 +205,12 @@ beforeEach(() => {
   );
   vi.spyOn(document, "hasFocus").mockImplementation(() => state.focused);
   vi.stubGlobal("Notification", Object.assign(state.notification, { permission: "granted" }));
+  unmounted = false;
   root = createRoot(document.createElement("div"));
 });
 
 afterEach(async () => {
-  await act(() => root.unmount());
+  await unmount();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -410,8 +418,7 @@ describe("fork system-delivery parity on V2 events", () => {
     state.mode = "off";
     await render();
     expect(close).toHaveBeenCalledWith("env-1:thread-1");
-    await act(() => renderer?.unmount());
-    renderer = undefined;
+    await unmount();
     expect(unsubscribe).toHaveBeenCalled();
     expect(state.notification).not.toHaveBeenCalled();
   });
@@ -517,8 +524,7 @@ describe("native delivery lifecycle", () => {
         state.mode = "off";
         await render();
       } else {
-        await act(() => renderer?.unmount());
-        renderer = undefined;
+        await unmount();
       }
       expect(state.badge).toHaveBeenLastCalledWith(0);
       await act(() => native.replies[0]!());
@@ -658,8 +664,7 @@ describe("system delivery availability", () => {
         state.mode = "off";
         await render();
       } else {
-        await act(() => renderer?.unmount());
-        renderer = undefined;
+        await unmount();
       }
       await act(() => reply(false));
       expect(state.add).not.toHaveBeenCalled();

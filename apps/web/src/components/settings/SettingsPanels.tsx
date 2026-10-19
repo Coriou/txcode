@@ -552,22 +552,21 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
       ? ["Time format"]
       : []),
-      ...(settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted
-        ? ["Turn completion notifications"]
-        : []),
-      ...(settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure
-        ? ["Failure notifications"]
-        : []),
-      ...(settings.notifyOnApprovalRequested !== DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested
-        ? ["Approval request notifications"]
-        : []),
-      ...(settings.notifyOnUserInputRequested !==
-      DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested
-        ? ["Input request notifications"]
-        : []),
-      ...(settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule
-        ? ["Notification focus rule"]
-        : []),
+    ...(settings.notifyOnTurnCompleted !== DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleted
+      ? ["Turn completion notifications"]
+      : []),
+    ...(settings.notifyOnFailure !== DEFAULT_UNIFIED_SETTINGS.notifyOnFailure
+      ? ["Failure notifications"]
+      : []),
+    ...(settings.notifyOnApprovalRequested !== DEFAULT_UNIFIED_SETTINGS.notifyOnApprovalRequested
+      ? ["Approval request notifications"]
+      : []),
+    ...(settings.notifyOnUserInputRequested !== DEFAULT_UNIFIED_SETTINGS.notifyOnUserInputRequested
+      ? ["Input request notifications"]
+      : []),
+    ...(settings.notificationFocusRule !== DEFAULT_UNIFIED_SETTINGS.notificationFocusRule
+      ? ["Notification focus rule"]
+      : []),
     ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
       ? ["Thread notifications"]
       : []),

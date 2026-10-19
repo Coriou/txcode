@@ -344,7 +344,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
       assert.equal(config.appId, "net.coriou.txcode");
-      assert.notProperty(config, "publish");
+      assert.isNull(config.publish);
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(

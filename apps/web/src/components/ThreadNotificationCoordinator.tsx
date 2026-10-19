@@ -55,32 +55,29 @@ export function ThreadNotificationCoordinator() {
   const pending = useRef(
     new Map<string, { environmentId: EnvironmentId; notification: NotificationHandle }>(),
   );
-  const onNotification = useCallback(
-    (environmentId: EnvironmentId, notification: NotificationHandle) => {
-      pending.current.get(notification.tag)?.notification.close();
-      pending.current.set(notification.tag, { environmentId, notification });
-      setNotificationBadge(pending.current.size);
-      // Register before an asynchronous native show, then reconcile its acknowledgement.
-      // A superseded handle must never dismiss the replacement through close-by-tag.
-      return (delivered: boolean) => {
-        const current = pending.current.get(notification.tag);
-        if (current !== undefined && current.notification !== notification) return false;
-        if (
-          delivered &&
-          current !== undefined &&
-          hasDesktopNotifications(getClientSettings().notificationMode)
-        )
-          return false;
-        notification.close();
-        if (current !== undefined) {
-          pending.current.delete(notification.tag);
-          setNotificationBadge(pending.current.size);
-        }
-        return !delivered && current !== undefined;
-      };
-    },
-    [],
-  );
+  const onNotification = (environmentId: EnvironmentId, notification: NotificationHandle) => {
+    pending.current.get(notification.tag)?.notification.close();
+    pending.current.set(notification.tag, { environmentId, notification });
+    setNotificationBadge(pending.current.size);
+    // Register before an asynchronous native show, then reconcile its acknowledgement.
+    // A superseded handle must never dismiss the replacement through close-by-tag.
+    return (delivered: boolean) => {
+      const current = pending.current.get(notification.tag);
+      if (current !== undefined && current.notification !== notification) return false;
+      if (
+        delivered &&
+        current !== undefined &&
+        hasDesktopNotifications(getClientSettings().notificationMode)
+      )
+        return false;
+      notification.close();
+      if (current !== undefined) {
+        pending.current.delete(notification.tag);
+        setNotificationBadge(pending.current.size);
+      }
+      return !delivered && current !== undefined;
+    };
+  };
 
   useEffect(() => {
     const activeIds = new Set(environmentIds);

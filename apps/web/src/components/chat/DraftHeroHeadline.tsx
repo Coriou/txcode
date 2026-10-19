@@ -61,20 +61,16 @@ function ProjectDriftHint(props: { readonly group: SidebarProjectSnapshot }) {
       workspaceRoot: m.workspaceRoot,
     })),
   );
-  const message = useMemo(
-    () =>
-      verdict === null
-        ? null
-        : describeWorkspaceDrift({
-            verdict,
-            // Non-preferred entries always target the group's representative copy.
-            preferredEnvironmentId: props.group.environmentId,
-            resolveEnvironmentLabel: (environmentId) =>
-              props.group.memberProjects.find((member) => member.environmentId === environmentId)
-                ?.environmentLabel ?? null,
-          }),
-    [verdict, props.group],
-  );
+  const message =
+    verdict === null
+      ? null
+      : describeWorkspaceDrift({
+          verdict,
+          preferredEnvironmentId: props.group.environmentId,
+          resolveEnvironmentLabel: (environmentId) =>
+            props.group.memberProjects.find((member) => member.environmentId === environmentId)
+              ?.environmentLabel ?? null,
+        });
   if (message === null) {
     return null;
   }

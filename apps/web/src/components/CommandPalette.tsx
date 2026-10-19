@@ -1178,14 +1178,10 @@ function OpenCommandPaletteDialog(props: {
 
   // Only entries the user would NOT land on from their current context can
   // carry a drift warning; the contextual entry is never warned about.
-  const driftCandidateKeys = useMemo(
-    () =>
-      new Set(
-        projectPickerEntries
-          .filter((entry) => !entry.isPreferred && entry.group.memberProjects.length > 1)
-          .map((entry) => `${entry.targetProject.environmentId}:${entry.targetProject.id}`),
-      ),
-    [projectPickerEntries],
+  const driftCandidateKeys = new Set(
+    projectPickerEntries
+      .filter((entry) => !entry.isPreferred && entry.group.memberProjects.length > 1)
+      .map((entry) => `${entry.targetProject.environmentId}:${entry.targetProject.id}`),
   );
   const projectThreadItems = (() => {
     const isScratch = (project: CommandPaletteProject) =>

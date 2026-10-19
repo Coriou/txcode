@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import {
   AVAILABLE_CONNECTION_STATE,
   connectionProjectionPhase,
