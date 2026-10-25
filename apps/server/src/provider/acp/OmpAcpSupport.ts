@@ -16,7 +16,6 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
-import { getProviderOptionStringSelectionValue } from "@t3tools/shared/model";
 import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -28,6 +27,15 @@ import {
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 export const OMP_RESUME_VERSION = 1 as const;
+// Upstream keeps this lookup private. OMP still needs it for thinking and mode.
+function getProviderOptionStringSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | undefined {
+  const value = selections?.find((candidate) => candidate.id === id)?.value;
+  return typeof value === "string" ? value : undefined;
+}
+
 const ACP_PLAN_MODE_ALIASES = ["plan", "architect"];
 const ACP_IMPLEMENT_MODE_ALIASES = ["code", "agent", "default", "chat", "implement"];
 
