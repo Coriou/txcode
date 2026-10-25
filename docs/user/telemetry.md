@@ -6,17 +6,23 @@ service also requires configuring its `T3CODE_POSTHOG_KEY`.
 
 When enabled, the server sends events to `T3CODE_POSTHOG_HOST`, which defaults to T3 Code's
 endpoint at `ingest.t3.codes`. That endpoint keeps a copy and forwards events to PostHog.
-Events are associated with a hashed account or installation identifier and include the provider,
+Events are associated with hashed account or installation identifiers: your T3 Connect account,
+your OpenAI and Claude accounts when signed in, and a random identifier for each connected device.
+They include the provider,
 model, reasoning effort, permission mode, turn result, duration, release channel, and main-agent
 token totals when available.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
 raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
 
-To disable collection, set `T3CODE_TELEMETRY_ENABLED=false` in the server's environment before
-starting it. This stops product events from being recorded or sent.
+Tx Code also sends relay connection traces to Axiom to diagnose T3 Connect connectivity.
 
-The desktop app reads the variable from your shell profile (for example `~/.zshrc`) on macOS and
+To disable product events and relay tracing, set `T3CODE_TELEMETRY_ENABLED=false` in the server's
+environment before starting it. Relay tracing also stops when `T3CODE_OTEL_SDK_DISABLED` or
+`OTEL_SDK_DISABLED` turns OpenTelemetry export off. The web app in a browser, including one the
+`t3` CLI opens, does not read these variables.
+
+The desktop app reads `T3CODE_TELEMETRY_ENABLED` from your shell profile (for example `~/.zshrc`) on macOS and
 Linux, so export it there and restart the app. On Windows, set it as a user environment variable.
 
 ## Export diagnostics to your own receiver
@@ -31,7 +37,8 @@ the signal's currently running endpoint and do not follow redirects. To check a 
 that requires authentication, save it and restart the server first.
 
 `T3CODE_OTLP_*_URL` and standard `OTEL_EXPORTER_OTLP_*` environment variables override the saved
-settings. For endpoints saved here or set with `T3CODE_OTLP_*_URL`, set `T3CODE_OTLP_HEADERS` for
+settings. An overridden signal shows **Set by environment** and names the variable that set it, and its
+**Test** checks the running endpoint instead of the field. For endpoints saved here or set with `T3CODE_OTLP_*_URL`, set `T3CODE_OTLP_HEADERS` for
 receivers that need authentication and `T3CODE_OTLP_PROTOCOL=http/protobuf` for receivers that do
 not accept JSON. An endpoint set with `OTEL_EXPORTER_OTLP_*` takes its headers and protocol from
 `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL` instead.
