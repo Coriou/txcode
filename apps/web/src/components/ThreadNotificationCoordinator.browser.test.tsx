@@ -1,3 +1,5 @@
+// This harness drives timers and Notification directly. It does not render a component.
+/* oxlint-disable t3code/require-disposable-render, t3code/no-frame-waits-in-browser-tests */
 import { WORKING_EXIT_GRACE_MS } from "@t3tools/client-runtime/state/thread-inbox";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 import type { ClientSettings } from "@t3tools/contracts/settings";
@@ -24,7 +26,11 @@ const state = vi.hoisted(() => ({
   turnError: false,
   limited: false,
   subagent: false,
-  background: [] as Array<{ taskId: string; kind: "command" | "monitor" }>,
+  background: [] as Array<{
+    taskId: string;
+    kind: "command" | "monitor";
+    awaited?: true;
+  }>,
   delegatedChild: null as "running" | "approval" | null,
   add: vi.fn(
     (_toast: { title: string; description: string; actionProps: { onClick: () => void } }) =>
@@ -188,7 +194,7 @@ async function unmount() {
 
 async function render() {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  router.state.matches = [{ params: { ...state.active } }];
+  router.state.matches = [{ params: { ...state.active } } as (typeof router.state.matches)[number]];
   registry.set(shellAtom("env-1"), {
     status: state.live ? "live" : "disconnected",
     snapshot: Option.some({ threads: mockThreads() }),
@@ -343,7 +349,7 @@ describe("thread notifications", () => {
 
   it("alerts when only a dev server is left running, not while a monitor can wake the agent", async () => {
     await render();
-    state.background = [{ taskId: "watch", kind: "monitor" }];
+    state.background = [{ taskId: "watch", kind: "monitor", awaited: true }];
     await complete();
     expect(state.add).not.toHaveBeenCalled();
     state.background = [{ taskId: "dev", kind: "command" }];

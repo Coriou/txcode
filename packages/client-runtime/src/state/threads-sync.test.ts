@@ -1878,11 +1878,10 @@ describe("EnvironmentThreads", () => {
       expect(Option.isNone(state.error)).toBe(true);
       yield* TestClock.adjust("1 minute");
       expect(yield* Ref.get(harness.removedThreads)).toEqual([THREAD_ID]);
-      expect(yield* Ref.get(harness.subscriptionCount)).toBe(1);
+      expect(yield* SubscriptionRef.get(harness.subscriptionCount)).toBe(1);
       expect(yield* Ref.get(harness.retryCount)).toBe(0);
     }),
   );
-
 
   it.effect("keeps cached state and retries unclassified socket failures", () =>
     Effect.gen(function* () {
@@ -1906,7 +1905,7 @@ describe("EnvironmentThreads", () => {
         (value) => value.status === "live" && Option.isNone(value.error),
       );
       expect(yield* Ref.get(harness.removedThreads)).toEqual([]);
-      expect(yield* Ref.get(harness.subscriptionCount)).toBe(2);
+      expect(yield* SubscriptionRef.get(harness.subscriptionCount)).toBe(2);
     }),
   );
 });

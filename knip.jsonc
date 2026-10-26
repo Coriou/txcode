@@ -52,8 +52,12 @@
         // graphqlgen reads its config.
         "graphql.config.ts",
       ],
-      // The generated operations export every selection's class.
-      "ignoreIssues": { "**/*.graphql.ts": ["exports", "types", "namespaceMembers"] },
+      // Generated operations export every selection's class. OmpAcpSupport's fork
+      // exports stay public; a per-symbol @public would lint that unchanged file.
+      "ignoreIssues": {
+        "**/*.graphql.ts": ["exports", "types", "namespaceMembers"],
+        "src/provider/acp/OmpAcpSupport.ts": ["exports"],
+      },
       // Keep the transitive Effect runtime pinned for standalone npm installs.
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
@@ -135,6 +139,12 @@
     "packages/*": {
       // These workspace packages are private to this monorepo.
       "includeEntryExports": true,
+    },
+    "packages/contracts": {
+      // Overrides packages/* for this package, so the entry-export check stays on.
+      // DEFAULT_NOTIFICATION_FOCUS_RULE stays public. Annotating it would lint this file.
+      "includeEntryExports": true,
+      "ignoreIssues": { "src/settings.ts": ["exports"] },
     },
     "packages/effect-acp": {
       "includeEntryExports": true,

@@ -210,6 +210,7 @@ import {
   sourceControlHostIcon,
 } from "./CommandPaletteAddProject";
 import { useCommandPaletteThreadItems } from "./CommandPaletteThreadItems";
+import { CommandPaletteMetaDot } from "./ThreadCommandSubtitle";
 import {
   APPEARANCE_OPTIONS,
   notifyThemeSaveFailure,

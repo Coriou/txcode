@@ -1004,14 +1004,9 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
 const isProtocolError = Schema.is(AcpSchema.Error);
 
 /**
- * Effect's ndjson-rpc parser decodes any JSON-RPC error response as a `Die`
- * carrying the raw `{ code, message, data? }` object. The client-side defect
- * schema then flattens that to `new Error(message)`, dropping `code` and
- * `data` — and ACP agents are plain JSON-RPC peers, so every agent-side
- * handler failure takes exactly that path. Rewrite those defects into `Fail`
- * errors so they decode through each RPC's declared `AcpSchema.Error`
- * failure channel and surface as typed `AcpRequestError`s (the shape
- * `handleExitEncoded` already expects for extension requests).
+ * ndjson-rpc turns a JSON-RPC error into a `Die` and drops `code` and `data`.
+ * ACP peers fail that way, so rewrite the defect as `Fail` and let it decode
+ * through the RPC's `AcpSchema.Error` channel as an `AcpRequestError`.
  */
 function normalizeJsonRpcErrorExit(
   message: RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded,

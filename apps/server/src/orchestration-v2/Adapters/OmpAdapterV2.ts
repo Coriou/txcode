@@ -43,6 +43,7 @@ import {
   type AcpAdapterV2Flavor,
 } from "@t3tools/provider-acp/server/adapter";
 
+/** @public */
 export const OMP_PROVIDER = ProviderDriverKind.make("omp");
 const DEFAULT_OMP_SETTINGS = Schema.decodeSync(OmpSettings)({});
 const isAcpRequestError = Schema.is(AcpErrors.AcpRequestError);
@@ -88,8 +89,8 @@ function withOmpCompletionCheck(runtime: AcpSessionRuntime.AcpSessionRuntime["Se
           yield* handler(notification);
         }),
       ),
-    prompt: (...args: Parameters<typeof runtime.prompt>) =>
-      Effect.gen(function* () {
+    prompt: Effect.fn("OmpAdapterV2.prompt")(
+      function* (...args: Parameters<typeof runtime.prompt>) {
         promptActive = true;
         producedContent = false;
         const result = yield* runtime.prompt(...args);
@@ -101,16 +102,17 @@ function withOmpCompletionCheck(runtime: AcpSessionRuntime.AcpSessionRuntime["Se
           });
         }
         return result;
-      }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            promptActive = false;
-          }),
-        ),
+      },
+      Effect.ensuring(
+        Effect.sync(() => {
+          promptActive = false;
+        }),
       ),
+    ),
   } satisfies AcpSessionRuntime.AcpSessionRuntime["Service"];
 }
 
+/** @public */
 export function makeOmpAcpAdapterFlavor(options: OmpAdapterV2Options): AcpAdapterV2Flavor {
   return {
     driver: OMP_PROVIDER,

@@ -30,11 +30,13 @@ import { enrichProviderSnapshotWithVersionAdvisory } from "@t3tools/provider-cor
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { ompProfileFromLaunchArgs } from "./acp/OmpAcpSupport.ts";
 
+/** @public */
 export const OMP_PRESENTATION = {
   displayName: "Oh My Pi",
   showInteractionModeToggle: false,
 } as const;
 
+/** @public */
 export const OMP_MINIMUM_VERSION = "17.4.0";
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 const MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
@@ -217,10 +219,8 @@ export function ompModelsCommandArgs(launchArgs: string | null | undefined): Rea
   return ["models", "--json", "--no-extensions", ...configArgs];
 }
 
-export function buildInitialOmpProviderSnapshot(
-  settings: OmpSettings,
-): Effect.Effect<ServerProviderDraft> {
-  return Effect.gen(function* () {
+export const buildInitialOmpProviderSnapshot = Effect.fn("buildInitialOmpProviderSnapshot")(
+  function* (settings: OmpSettings) {
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
     return buildServerProvider({
       presentation: OMP_PRESENTATION,
@@ -243,26 +243,24 @@ export function buildInitialOmpProviderSnapshot(
             message: "Oh My Pi is disabled in Tx Code settings.",
           },
     });
-  });
-}
+  },
+);
 
-function runOmpCommand(
+const runOmpCommand = Effect.fn("runOmpCommand")(function* (
   settings: Pick<OmpSettings, "binaryPath">,
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv,
 ) {
-  return Effect.gen(function* () {
-    const command = settings.binaryPath?.trim() || "omp";
-    const resolved = yield* resolveSpawnCommand(command, args, { env: environment });
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(resolved.command, resolved.args, {
-        env: environment,
-        shell: resolved.shell,
-      }),
-    );
-  });
-}
+  const command = settings.binaryPath?.trim() || "omp";
+  const resolved = yield* resolveSpawnCommand(command, args, { env: environment });
+  return yield* spawnAndCollect(
+    command,
+    ChildProcess.make(resolved.command, resolved.args, {
+      env: environment,
+      shell: resolved.shell,
+    }),
+  );
+});
 
 function readOptionalOmpConfigValue(
   settings: Pick<OmpSettings, "binaryPath">,

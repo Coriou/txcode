@@ -53,6 +53,35 @@ function makeMockDetachedHandle(input: MockSpawnResult & { readonly onUnref?: ()
   });
 }
 
+// Product discovery always probes /Applications. Hide the host stable bundle so this fixture
+// does not observe a machine-local Visual Studio Code install.
+const hostStableVsCodeBundle = (path: string) =>
+  path === "/Applications/Visual Studio Code.app" ||
+  path.startsWith("/Applications/Visual Studio Code.app/") ||
+  /^\/Applications\/Visual Studio Code \d[\d.]*\.app(?:\/|$)/.test(path);
+
+const hideHostStableVsCode = (fileSystem: FileSystem.FileSystem): FileSystem.FileSystem => ({
+  ...fileSystem,
+  stat: (path) =>
+    hostStableVsCodeBundle(path)
+      ? Effect.fail(
+          new PlatformError.PlatformError(
+            new PlatformError.SystemError({
+              _tag: "NotFound",
+              module: "FileSystem",
+              method: "stat",
+              pathOrDescriptor: path,
+            }),
+          ),
+        )
+      : fileSystem.stat(path),
+});
+
+const layerHideHostStableVsCode = Layer.effect(
+  FileSystem.FileSystem,
+  Effect.map(FileSystem.FileSystem, hideHostStableVsCode),
+);
+
 const layerTest = (input: {
   readonly platform: NodeJS.Platform;
   readonly env?: Record<string, string>;
@@ -60,6 +89,7 @@ const layerTest = (input: {
   readonly onSpawn?: (command: ChildProcess.StandardCommand) => void;
   readonly onUnref?: () => void;
   readonly spawnResult?: (command: ChildProcess.StandardCommand) => MockSpawnResult | undefined;
+  readonly hideHostStableVsCode?: boolean;
 }) => {
   const layerSpawner = Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -80,8 +110,13 @@ const layerTest = (input: {
     ),
   );
 
+  const services = Layer.merge(NodeServices.layer, layerSpawner);
+  const launcher = input.hideHostStableVsCode
+    ? ExternalLauncher.layer.pipe(Layer.provide(layerHideHostStableVsCode), Layer.provide(services))
+    : ExternalLauncher.layer.pipe(Layer.provide(services));
+
   return Layer.mergeAll(
-    ExternalLauncher.layer.pipe(Layer.provide(Layer.merge(NodeServices.layer, layerSpawner))),
+    launcher,
     Layer.succeed(HostProcess.Platform, input.platform),
     Layer.succeed(
       SpawnExecutableResolution,
@@ -441,6 +476,7 @@ it.effect("keeps the macOS VS Code Insiders bundle out of stable VS Code", () =>
         layerTest({
           platform: "darwin",
           env: { HOME: home, PATH: path.join(home, "empty") },
+          hideHostStableVsCode: true,
           onSpawn: (command) => {
             spawned = command;
           },

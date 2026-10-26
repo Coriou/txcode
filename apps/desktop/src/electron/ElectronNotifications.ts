@@ -53,32 +53,31 @@ export const make = Effect.gen(function* () {
   return ElectronNotifications.of({
     isSupported: Effect.sync(() => Electron.Notification.isSupported()),
     close,
-    show: (options, onClick) =>
-      Effect.gen(function* () {
-        if (options.tag !== undefined) yield* close(options.tag);
-        yield* Effect.sync(() => {
-          const notification = new Electron.Notification({
-            title: options.title,
-            body: options.body,
-            silent: true,
-          });
-          live.add(notification);
-          if (options.tag !== undefined) tagged.set(options.tag, notification);
-          notification.on("close", () => forget(notification, options.tag));
-          notification.on("failed", () => forget(notification, options.tag));
-          notification.on("click", () => {
-            if (!forget(notification, options.tag)) return;
-            notification.close();
-            runFork(onClick);
-          });
-          try {
-            notification.show();
-          } catch (cause) {
-            forget(notification, options.tag);
-            throw cause;
-          }
+    show: Effect.fn("ElectronNotifications.show")(function* (options, onClick) {
+      if (options.tag !== undefined) yield* close(options.tag);
+      yield* Effect.sync(() => {
+        const notification = new Electron.Notification({
+          title: options.title,
+          body: options.body,
+          silent: true,
         });
-      }),
+        live.add(notification);
+        if (options.tag !== undefined) tagged.set(options.tag, notification);
+        notification.on("close", () => forget(notification, options.tag));
+        notification.on("failed", () => forget(notification, options.tag));
+        notification.on("click", () => {
+          if (!forget(notification, options.tag)) return;
+          notification.close();
+          runFork(onClick);
+        });
+        try {
+          notification.show();
+        } catch (cause) {
+          forget(notification, options.tag);
+          throw cause;
+        }
+      });
+    }),
   });
 });
 

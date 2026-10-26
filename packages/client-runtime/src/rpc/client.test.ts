@@ -18,6 +18,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as TestClock from "effect/testing/TestClock";
 import { RpcClientError } from "effect/rpc";
 
 import {
@@ -30,12 +31,7 @@ import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as RpcSession from "../rpc/session.ts";
 import { wasSubscribeThreadNotFound } from "../errors/orchestration.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
-import {
-  runStream,
-  subscribe,
-  subscribeDynamic,
-  subscribeDynamicWithSession,
-} from "./client.ts";
+import { runStream, subscribe, subscribeDynamic, subscribeDynamicWithSession } from "./client.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
