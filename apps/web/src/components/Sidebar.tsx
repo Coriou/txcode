@@ -1227,7 +1227,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const threadByKeyRef = useRef(threadByKey);
   const settledThreadKeysRef = useRef(settledThreadKeys);
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
-  // Every environment's shells, unlike the scoped `threads`; snooze slots compare across them.
+  // Fork-local: every environment's quiet shells; snooze slots compare across them.
   const quietThreadsRef = useRef(threads);
 
   // Fork-local: reserve wake times other threads still hold so a batch wakes in sequence.
