@@ -16,6 +16,7 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   type DiffLayout,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+  // Fork-local: the spacing row below needs these bounds.
   MAX_SNOOZE_SPACING_MINUTES,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_SNOOZE_SPACING_MINUTES,
@@ -473,6 +474,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze until limits reset"]
       : []),
+    // Fork-local: resetting settings also clears the spacing value.
     ...(settings.snoozeSpacingMinutes !== DEFAULT_UNIFIED_SETTINGS.snoozeSpacingMinutes
       ? ["Space snoozes by"]
       : []),
@@ -639,6 +641,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      // Fork-local: restored defaults include the fork's spacing setting.
       snoozeSpacingMinutes: DEFAULT_UNIFIED_SETTINGS.snoozeSpacingMinutes,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -688,6 +691,7 @@ export function useSettingsRestore(onRestored?: () => void) {
 
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
+// Fork-local: widened from auto-settle days so spacing can reuse the same field.
 function NumberSettingInput({
   value,
   min,
@@ -998,6 +1002,7 @@ export function GeneralSettingsPanel() {
           }
         />
 
+        {/* Fork-local: spacing between snoozes that would otherwise wake together. */}
         <SettingsRow
           serverScoped
           {...searchableSetting("snooze-spacing")}

@@ -36,6 +36,7 @@ function selectEnvironment(config: ServerConfig) {
     ),
     machineKind: resolveEnvironmentMachineKind(config),
     capabilities: config.environment.capabilities,
+    // Fork-local: rows space snoozes with the minutes this environment reports.
     snoozeSpacingMinutes: config.settings.snoozeSpacingMinutes,
   };
 }
@@ -72,6 +73,7 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
   const pinReorderEnvironmentIds = new Set<EnvironmentId>();
   const activeReorderEnvironmentIds = new Set<EnvironmentId>();
   const titleRegenerationEnvironmentIds = new Set<EnvironmentId>();
+  // Fork-local: one spacing value per environment, for the rows that offer a menu.
   const snoozeSpacingMinutesByEnvironment = new Map<EnvironmentId, number>();
   for (const [id, { providers, machineKind, capabilities, snoozeSpacingMinutes }] of environments) {
     providersByEnvironmentId.set(id, providers);
@@ -95,6 +97,7 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
+    // Fork-local: rows look up their environment's spacing through this map.
     snoozeSpacingMinutesByEnvironment,
   };
 }
@@ -118,6 +121,7 @@ export function createThreadListEnvironmentsAtom(
         prior &&
         prior.providers === selected.providers &&
         prior.machineKind === selected.machineKind &&
+        // Fork-local: a spacing change must reach the rows through a new list.
         prior.snoozeSpacingMinutes === selected.snoozeSpacingMinutes &&
         capabilityKeys.every(
           (key) => (prior.capabilities[key] === true) === (selected.capabilities[key] === true),

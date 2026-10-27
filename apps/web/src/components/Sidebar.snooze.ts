@@ -1,4 +1,5 @@
 import type { TimestampFormat } from "@t3tools/contracts/settings";
+// Fork-local: presets come back spaced, each carrying its own wake time.
 import {
   spaceSnoozePresets,
   type SnoozeSpacing,
@@ -17,6 +18,7 @@ function timeOfDayLabel(date: Date, timestampFormat: TimestampFormat): string {
   return formatShortTimestamp(date.toISOString(), timestampFormat);
 }
 
+// Fork-local: a spaced preset's label follows the slot it landed in.
 function whenLabel(
   preset: SnoozePreset,
   snoozedUntil: string,
@@ -30,6 +32,7 @@ function whenLabel(
     : time;
 }
 
+// Fork-local: optional spacing spreads presets and relabels them from their slots.
 export function resolveSnoozePresets(
   now: Date,
   timestampFormat: TimestampFormat,

@@ -8,6 +8,7 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+// Fork-local: mobile menus space presets the same way the web sidebar does.
 import {
   spaceSnoozePresets,
   type SnoozeSpacing,
@@ -76,6 +77,7 @@ export type ThreadListV2Status =
   | "ready";
 export type ThreadListV2SwipeAction = "archive" | "settle" | "unsettle" | "snooze" | "unsnooze";
 
+// Fork-local: spread presets across free wake slots when spacing is configured.
 export function resolveThreadListV2SnoozePresets(
   now: Date,
   spacing?: SnoozeSpacing,

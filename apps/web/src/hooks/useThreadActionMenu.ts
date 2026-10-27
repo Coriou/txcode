@@ -8,6 +8,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+// Fork-local: menus space presets against the wake times other threads hold.
 import { selectSnoozeOccupancy } from "@t3tools/client-runtime/state/snooze-spacing";
 import {
   AuthOrchestrationOperateScope,
@@ -33,10 +34,11 @@ import {
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentSupportsTitleRegeneration,
+  // Fork-local: spacing comes from the thread's environment and every shell.
+  readEnvironmentSnoozeSpacingMinutes,
+  readQuietThreadShells,
   readThreadShell,
   useProjects,
-  useQuietThreadShells,
-  useServerConfigs,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { readLocalApi } from "../localApi";
@@ -71,8 +73,6 @@ export function useThreadActionMenu(input: {
   const { threadRef, projectCwd, onStartRename, canShareWithGuest } = input;
   const router = useRouter();
   const projects = useProjects();
-  const quietThreads = useQuietThreadShells();
-  const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const logicalProjectKeyByPhysicalKey = buildPhysicalToLogicalProjectKeyMap({
@@ -135,14 +135,15 @@ export function useThreadActionMenu(input: {
         titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
+      // Fork-local: skip this thread's own wake time so it can move into a free slot.
       const snoozePresets = resolveSnoozePresets(now, timestampFormat, {
-        occupied: selectSnoozeOccupancy(quietThreads, {
+        occupied: selectSnoozeOccupancy(readQuietThreadShells(), {
           now: now.toISOString(),
           exclude: (candidate) =>
             candidate.id === thread.id && candidate.environmentId === thread.environmentId,
         }),
         spacingMinutes:
-          serverConfigs.get(thread.environmentId)?.settings.snoozeSpacingMinutes ??
+          readEnvironmentSnoozeSpacingMinutes(thread.environmentId) ??
           DEFAULT_SERVER_SETTINGS.snoozeSpacingMinutes,
       });
       const items = buildThreadActionMenuItems({

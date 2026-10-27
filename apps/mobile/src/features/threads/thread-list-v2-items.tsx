@@ -26,7 +26,7 @@ import {
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
 import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
-import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
+import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import type { MenuAction } from "@react-native-menu/menu";
 import { memo, useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
@@ -52,6 +52,7 @@ import { useThreadPr } from "../../state/use-thread-pr";
 import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
+// Fork-local: the menu and the click-time resolver share one spaced preset set.
 import {
   withoutSnoozeOccupant,
   type SnoozeOccupancy,
@@ -562,6 +563,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly snoozeWakeLabelText?: string;
   readonly timeLabel: string;
   readonly snoozePresetMinute: string;
+  /** Fork-local: wake times other threads hold, and the configured spacing. */
   readonly snoozeOccupancy: SnoozeOccupancy;
   readonly snoozeSpacingMinutes: number;
   readonly project: EnvironmentProject | null;
@@ -742,13 +744,18 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     snoozable: canSnooze(thread, { now: snoozeGateNow }),
     snoozed: snoozedRow,
   });
+  // Fork-local: a thread that woke early holds no slot, so freeing one here would steal another's.
+  const stillSnoozed = effectiveSnoozed(thread, { now: snoozeGateNow });
   const snoozeSpacing = useMemo(
     () => ({
-      occupied: withoutSnoozeOccupant(props.snoozeOccupancy, thread.snoozedUntil),
+      occupied: stillSnoozed
+        ? withoutSnoozeOccupant(props.snoozeOccupancy, thread.snoozedUntil)
+        : props.snoozeOccupancy,
       spacingMinutes: props.snoozeSpacingMinutes,
     }),
-    [props.snoozeOccupancy, props.snoozeSpacingMinutes, thread.snoozedUntil],
+    [props.snoozeOccupancy, props.snoozeSpacingMinutes, stillSnoozed, thread.snoozedUntil],
   );
+  // Fork-local: presets are spaced against the other threads' reservations.
   const snoozePresets = useMemo(() => {
     if (swipeActions.secondary !== "snooze") return [] as const;
     // oxlint-disable-next-line react/purity -- The memo recomputes on the snoozePresetMinute tick, so preset times refresh every minute.

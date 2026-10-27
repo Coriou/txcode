@@ -344,6 +344,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["usage quota rate limit reset wake recover continue"],
   },
+  // Fork-local: makes the spacing row reachable from settings search.
   {
     id: "snooze-spacing",
     title: "Space snoozes by",

@@ -365,6 +365,7 @@ function SidebarThreadTooltip({
   );
 }
 
+// Fork-local: presets resolve per opening, against the slots other threads hold.
 function SnoozeMenuButton(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;

@@ -11,6 +11,7 @@ import {
 } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+// Fork-local: row menus stagger snooze presets by each environment's minutes.
 import { DEFAULT_SNOOZE_SPACING_MINUTES } from "@t3tools/contracts/settings";
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
@@ -444,6 +445,7 @@ export function HomeScreen(props: HomeScreenProps) {
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
+    // Fork-local: spacing is set per environment, so rows read their own.
     snoozeSpacingMinutesByEnvironment,
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
@@ -453,6 +455,7 @@ export function HomeScreen(props: HomeScreenProps) {
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    // Fork-local: rows space their presets against other threads' wake times.
     snoozeOccupancy,
   } = useThreadListV2({
     threads: props.threads,

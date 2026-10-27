@@ -63,8 +63,8 @@ vi.mock("../state/entities", () => ({
     latestRun: null,
   }),
   useProjects: () => [{ id: "project", environmentId: "secondary" }],
-  useQuietThreadShells: () => [],
-  useServerConfigs: () => new Map(),
+  readQuietThreadShells: () => [],
+  readEnvironmentSnoozeSpacingMinutes: () => undefined,
 }));
 vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "primary" }));
 vi.mock("../state/threads", () => ({ threadEnvironment: { updateMetadata: "metadata" } }));

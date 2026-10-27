@@ -151,6 +151,18 @@ describe("allocateSnoozeSlots", () => {
     expect([...occupied.keys()]).toEqual([Date.parse(TOMORROW)]);
   });
 
+  it("holds a long batch to the hour cap counted from its base", () => {
+    const slots = allocateSnoozeSlots({
+      snoozedUntil: TOMORROW,
+      count: 20,
+      occupied: occupancy(),
+      spacingMinutes: 5,
+    });
+    expect(slots[0]).toBe(TOMORROW);
+    expect(slots[12]).toBe(plusMinutes(TOMORROW, 60));
+    expect(slots[19]).toBe(plusMinutes(TOMORROW, 60));
+  });
+
   it("keeps the base time for every thread when spacing is disabled", () => {
     expect(
       allocateSnoozeSlots({

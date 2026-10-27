@@ -1,4 +1,5 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
+// Fork-local: occupancy for the mobile row snooze menus, from live reservations.
 import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { selectSnoozeOccupancy } from "@t3tools/client-runtime/state/snooze-spacing";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -148,8 +149,7 @@ export function useThreadListV2(input: {
         )) &&
       (searchQuery.length === 0 || pendingTask.title.toLocaleLowerCase().includes(searchQuery)),
   );
-  // Rows read one occupancy value; keying it on reservations keeps unrelated
-  // shell updates from re-rendering every row that offers a snooze menu.
+  // Fork-local: keyed on reservations so unrelated shell updates skip row re-renders.
   const reservationKey = threads
     .flatMap((thread) =>
       effectiveSnoozed(thread, { now: input.now }) ? [thread.snoozedUntil ?? ""] : [],
@@ -179,6 +179,7 @@ export function useThreadListV2(input: {
     moveAvailability,
     shelfPreferencesLoading: !input.shelfPreferencesLoaded,
   });
+  // Fork-local: rows read occupancy to space their own menu presets.
   return { layout, items, contentOnlyThreadKeys, olderSettledShelf, snoozeOccupancy };
 }
 

@@ -28,6 +28,7 @@ import {
   effectiveSnoozed,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
+// Fork-local: batch snoozes reserve wake times other threads still hold.
 import {
   allocateSnoozeSlots,
   selectSnoozeOccupancy,
@@ -58,6 +59,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  // Fork-local: menu copy states the default spacing and the spread's time range.
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   type ScopedThreadRef,
@@ -1248,7 +1250,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     };
   };
 
-  // Stable so memoized rows do not re-render; the occupancy scan runs when a row opens its menu.
+  // Fork-local: stable so memoized rows do not re-render; the scan runs when a menu opens.
   const resolveRowSnoozePresets = useStableCallback((thread: EnvironmentThreadShell) => {
     const now = new Date();
     return resolveSnoozePresets(
@@ -1606,6 +1608,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     threadByKeyRef.current = threadByKey;
     settledThreadKeysRef.current = settledThreadKeys;
     snoozedThreadKeysRef.current = snoozedThreadKeys;
+    // Fork-local: slots compare wake times across every environment a row can see.
     quietThreadsRef.current = threads;
     sectionByThreadKeyRef.current = sectionByThreadKey;
   });
@@ -2118,6 +2121,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       const unpinMenuItem = buildBulkUnpinContextMenuItem({
         pinnedCount: pinnedSelectedThreads.length,
       });
+      // Fork-local: a multi-select snooze ignores the selection's own reservations.
       const selectedThreadKeySet = new Set(selectedThreadKeys);
       const snoozeSpacing = snoozeSpacingFor(
         selectionNow,
@@ -2128,6 +2132,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ),
       );
       const snoozePresets = resolveSnoozePresets(selectionNow, timestampFormat, snoozeSpacing);
+      // The hour cap counts from the unshifted base, not the first free slot the menu shows.
+      const snoozeBasePresets = resolveSnoozePresets(selectionNow, timestampFormat);
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
@@ -2199,6 +2205,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       if (clicked.value === "settle" && actionTargets.length === 0) return;
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
       if (clicked.value?.startsWith("snooze:")) {
+        // Fork-local: presets fan out across free slots; a custom time stays exact.
         const custom = clicked.value === "snooze:custom";
         const preset = custom
           ? await requestCustomSnooze()
@@ -2208,7 +2215,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           const snoozeSlots = custom
             ? selectedThreads.map(() => preset.snoozedUntil)
             : allocateSnoozeSlots({
-                snoozedUntil: preset.snoozedUntil,
+                snoozedUntil:
+                  snoozeBasePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value)
+                    ?.snoozedUntil ?? preset.snoozedUntil,
                 count: selectedThreads.length,
                 occupied: snoozeSpacing.occupied,
                 spacingMinutes: snoozeSpacing.spacingMinutes,
@@ -2450,6 +2459,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
+        // Fork-local: rows spread theirs against the other threads' wake times.
         const snoozePresets = resolveRowSnoozePresets(thread);
         const threadProjectGroup =
           projectGroupsRef.current.find((project) =>

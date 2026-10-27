@@ -10,6 +10,7 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+// Fork-local: the spacing row below needs these bounds and a numeric field.
 import {
   MAX_SNOOZE_SPACING_MINUTES,
   MIN_SNOOZE_SPACING_MINUTES,
@@ -95,6 +96,7 @@ function AutoSettleSettingsRows() {
     patch: Partial<AutoSettleSettings> & {
       autoResumeLimitedThreads?: boolean;
       snoozeLimitedThreads?: boolean;
+      // Fork-local: spacing writes ride along with the other snooze settings.
       snoozeSpacingMinutes?: number;
     },
   ) => {
@@ -199,6 +201,7 @@ function AutoSettleSettingsRows() {
               onValueChange={(value) => writeToAll({ snoozeLimitedThreads: value })}
             />
           </SettingsSection>
+          {/* Fork-local: spacing applies wherever a snooze can land, not per project. */}
           <SettingsSection title="Snoozes">
             <View className="flex-row items-center gap-4 px-4 py-4 android:min-h-14 android:py-3">
               <Text className="flex-1 text-foreground text-lg android:text-base">
