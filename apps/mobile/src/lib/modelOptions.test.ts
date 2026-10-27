@@ -536,6 +536,7 @@ describe("mobile model options", () => {
     expect(resolveDefaultableModelSelection(null, legacy, null)).toBe(legacy);
   });
 
+
   it("resolves new tasks from draft, project, sticky, then provider defaults", () => {
     const draft = { instanceId: ProviderInstanceId.make("codex"), model: "draft" };
     const project = { instanceId: ProviderInstanceId.make("codex"), model: "project" };
@@ -742,6 +743,7 @@ describe("mobile model options", () => {
       },
     ]);
   });
+
 
   it("uses the selected provider interaction-mode capability", () => {
     const config = {

@@ -1170,6 +1170,7 @@ describe("AcpRuntimeModel", () => {
     }
   });
 
+
   it("projects typed ACP usage and available command updates", () => {
     const usageResult = parseSessionUpdateEvent({
       sessionId: "session-1",
