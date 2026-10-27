@@ -50,6 +50,7 @@ export type BuiltInUsageReadersEnv =
   | ProviderUsageReaderEnv<typeof CursorDriver>
   | ProviderUsageReaderEnv<typeof PiDriver>
   | ProviderUsageReaderEnv<typeof MuseDriver>
+  // Fork-local: Oh My Pi usage reader.
   | ProviderUsageReaderEnv<typeof OmpDriver>;
 
 /** Order matters: aggregation keeps the first duplicate record. */
@@ -64,5 +65,6 @@ export const BUILT_IN_USAGE_DRIVERS: ReadonlyArray<
   MuseDriver,
   AntigravityDriver,
   CursorDriver,
+  // Fork-local: Oh My Pi usage reader.
   OmpDriver,
 ];
