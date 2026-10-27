@@ -16,6 +16,8 @@ export const UsageProviderKind = Schema.Literals([
   "antigravity",
   "pi",
   "muse",
+  // Fork-local: the Oh My Pi provider.
+  "omp",
 ]);
 export type UsageProviderKind = typeof UsageProviderKind.Type;
 

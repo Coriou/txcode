@@ -12,6 +12,7 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeOmpTextGeneration } from "../../textGeneration/OmpTextGeneration.ts";
 import { ProviderDriverError } from "../Errors.ts";
+import { ompUsageReader, type OmpUsageEnv } from "./ompUsage.ts";
 import {
   OmpAdapterV2Driver,
   type OmpAdapterV2DriverEnv,
@@ -88,12 +89,13 @@ const withInstanceIdentity =
     continuation: { groupKey: input.continuationGroupKey },
   });
 
-export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv> = {
+export const OmpDriver: ProviderDriver<OmpSettings, OmpDriverEnv, OmpUsageEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "Oh My Pi",
     supportsMultipleInstances: true,
   },
+  usage: ompUsageReader,
   configSchema: OmpSettings,
   defaultConfig: (): OmpSettings => decodeOmpSettings({}),
   create: Effect.fn("OmpDriver.create")(function* ({
