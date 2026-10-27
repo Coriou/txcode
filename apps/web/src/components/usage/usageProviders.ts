@@ -45,6 +45,12 @@ export const PROVIDER_PRESENTATION = {
     color: "#0866ff",
     driverKind: ProviderDriverKind.make("muse"),
   },
+  // Fork-local: the Oh My Pi provider.
+  omp: {
+    label: "Oh My Pi",
+    color: "#f97316",
+    driverKind: ProviderDriverKind.make("omp"),
+  },
 } satisfies Record<UsageProviderKind, UsageProviderPresentation>;
 
 export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProviderKind[];

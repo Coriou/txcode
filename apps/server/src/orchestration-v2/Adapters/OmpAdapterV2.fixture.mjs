@@ -67,6 +67,15 @@ const finish = (stopReason = "end_turn", value = "hello from OMP") => {
   const current = prompt;
   prompt = undefined;
   if (value) text(current.params.sessionId, value);
+  // OMP reports cumulative session cost with the end-of-turn context update.
+  const usageCost = Number(process.env.OMP_USAGE_COST ?? "");
+  if (usageCost > 0)
+    update(current.params.sessionId, {
+      sessionUpdate: "usage_update",
+      size: 1_048_576,
+      used: 479_761,
+      cost: { amount: usageCost, currency: "USD" },
+    });
   result(current.id, { stopReason });
 };
 NodeReadline.createInterface({ input: process.stdin }).on("line", (line) => {

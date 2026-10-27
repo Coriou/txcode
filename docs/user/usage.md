@@ -8,7 +8,7 @@ On mobile, choose **Usage** in the workspace navigation.
 
 ## Understand your usage
 
-**Usage** combines Codex, Claude Code, Grok Build, OpenCode, Antigravity, Pi, Muse Code, and Cursor history
+**Usage** combines Codex, Claude Code, Grok Build, OpenCode, Antigravity, Pi, Muse Code, Oh My Pi, and Cursor history
 from your connected environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
 cost, split by token type and by speed. These estimates are not your subscription bill.
 **Premium** is what Fast and Ultrafast requests cost above standard rates. Cost that cannot be
@@ -36,6 +36,12 @@ variable. Pi reads `~/.pi/agent/sessions`, or the `sessions` directory under
 `PI_CODING_AGENT_DIR`. Set `PI_CODING_AGENT_SESSION_DIR` to read a different session directory.
 To include sessions saved through `--session-dir` or Pi's `sessionDir` setting, set this environment
 variable to the same directory. Pi includes recorded tool and summary costs under `Tools/summaries`.
+Oh My Pi reads its native session history, including subagent sessions, from `~/.omp/agent/sessions`,
+the `sessions` directory under `PI_CODING_AGENT_DIR`, or `$XDG_DATA_HOME/omp/sessions` once its data
+has been migrated there. A `--profile` launch argument or `OMP_PROFILE` reads that profile's store,
+`PI_CONFIG_DIR` renames the config directory, and `PI_CODING_AGENT_SESSION_DIR` (or a `--session-dir`
+launch argument) overrides the session directory. Pointing Pi and Oh My Pi at one store with
+`PI_CODING_AGENT_DIR` counts those sessions under both providers.
 Muse Code reads native session history, including child sessions, from the home reported by the
 configured Muse CLI. Its environment settings, including `XDG_DATA_HOME`, apply. Models without
 known prices still contribute tokens and appear as unpriced; set custom prices to estimate their cost.

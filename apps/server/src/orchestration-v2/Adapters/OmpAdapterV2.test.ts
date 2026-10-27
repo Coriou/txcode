@@ -237,6 +237,29 @@ describe("OMP V2 native ACP parity", () => {
     }).pipe(Effect.provide(layer), Effect.scoped),
   );
 
+  it.effect("keeps the cumulative session cost OMP reports with its end-of-turn usage", () =>
+    Effect.gen(function* () {
+      const { runtime, turnInput } = yield* open({ OMP_USAGE_COST: "4.91" });
+      yield* runtime.startTurn(turnInput);
+      const events = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+      );
+      const usage = events.findLast(
+        (event) => event.type === "provider_thread.updated" && event.providerThread.contextUsage,
+      );
+
+      assert.deepEqual(
+        usage?.type === "provider_thread.updated" ? usage.providerThread.contextUsage : undefined,
+        {
+          usedTokens: 479_761,
+          maxTokens: 1_048_576,
+          cost: { amount: 4.91, currency: "USD" },
+        },
+      );
+    }).pipe(Effect.provide(layer), Effect.scoped),
+  );
+
   it.effect(
     "applies model, thinking and native implementation mode and resumes native sessions",
     () =>

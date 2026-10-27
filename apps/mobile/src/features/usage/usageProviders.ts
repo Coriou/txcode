@@ -10,6 +10,8 @@ export const PROVIDER_ORDER: readonly UsageProviderKind[] = [
   "antigravity",
   "pi",
   "muse",
+  // Fork-local: the Oh My Pi provider.
+  "omp",
 ];
 
 export function usageProviderKind(driver: string): UsageProviderKind | null {
@@ -26,6 +28,8 @@ export const PROVIDER_LABEL: Record<UsageProviderKind, string> = {
   antigravity: "Antigravity",
   pi: "Pi",
   muse: "Muse Code",
+  // Fork-local: the Oh My Pi provider.
+  omp: "Oh My Pi",
 };
 
 export function useProviderColors(): Record<UsageProviderKind, string> {
@@ -39,6 +43,8 @@ export function useProviderColors(): Record<UsageProviderKind, string> {
     antigravity: "#8c7bd1",
     pi: "#4d9f8a",
     muse: "#0866ff",
+    // Fork-local: the Oh My Pi provider.
+    omp: "#f97316",
   };
 }
 
