@@ -918,13 +918,26 @@ export const OmpSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    openrouterUpstreams: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "OpenRouter upstreams",
+        description:
+          "Comma-separated OpenRouter provider slugs offered as an upstream pin on Oh My Pi OpenRouter models (for example deepinfra, cerebras). Leave empty to hide the pin.",
+        providerSettingsForm: {
+          control: "textarea",
+          placeholder: "deepinfra, cerebras",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
     customModels: Schema.Array(Schema.String).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath", "launchArgs"],
+    order: ["binaryPath", "launchArgs", "openrouterUpstreams"],
   },
 );
 export type OmpSettings = typeof OmpSettings.Type;

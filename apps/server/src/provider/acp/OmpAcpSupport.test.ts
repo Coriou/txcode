@@ -25,6 +25,35 @@ describe("buildOmpAcpSpawnInput", () => {
     });
   });
 
+  it("loads the OpenRouter routing extension and points it at the pin directory", () => {
+    expect(
+      buildOmpAcpSpawnInput(
+        { binaryPath: "omp", launchArgs: "--profile work" },
+        "/tmp/project",
+        { PATH: "/usr/bin" },
+        "auto",
+        {
+          dir: "/tmp/routing",
+          pinsDir: "/tmp/routing/pins",
+          extensionPath: "/tmp/routing/openrouter-routing.ts",
+        },
+      ),
+    ).toEqual({
+      command: "omp",
+      args: [
+        "acp",
+        "--profile",
+        "work",
+        "--approval-mode",
+        "always-ask",
+        "-e",
+        "/tmp/routing/openrouter-routing.ts",
+      ],
+      cwd: "/tmp/project",
+      env: { PATH: "/usr/bin", T3_OMP_ROUTING_DIR: "/tmp/routing" },
+    });
+  });
+
   it.each([
     ["approval-required", "always-ask"],
     ["auto", "always-ask"],

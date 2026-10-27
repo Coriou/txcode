@@ -55,3 +55,19 @@ currently applies its ACP client gate and its native approval gate to those call
 OMP does not yet expose the provider-history controls that Tx Code needs for checkpoint rollback or
 the Tx Code Plan mode lifecycle. Tx Code hides Plan mode for OMP and reports checkpoint rollback as
 unsupported. Follow-up messages wait for the active OMP turn to finish, then start a new turn.
+
+## OpenRouter upstreams
+
+OpenRouter can serve one model from several upstream providers, such as DeepInfra, Cerebras, or
+Amazon Bedrock. Those endpoints differ in price, quantization, throughput, and context limit. To
+choose one, list the upstreams you use under **Settings → Providers → Oh My Pi → OpenRouter
+upstreams**, comma-separated, for example `deepinfra, cerebras`.
+
+OpenRouter models then show an **Upstream** control beside **Thinking** in the composer. **Auto**
+keeps OpenRouter's own routing; picking a provider pins that thread's requests to it, including
+after the thread is resumed. A change applies from the next request on, and the selection is stored
+with the thread, so another device sees the same pin.
+
+Tx Code applies the pin with a small OMP extension it regenerates under
+`<state dir>/omp-openrouter-routing`; your OMP configuration and `models.yml` are not modified. The
+pin only applies to models that OMP routes through its `openrouter` provider.
