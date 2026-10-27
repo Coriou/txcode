@@ -20,6 +20,10 @@ import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
+  OMP_OPENROUTER_ROUTING_ENV,
+  type OmpOpenRouterRoutingPaths,
+} from "./OmpOpenRouterRouting.ts";
+import {
   type AcpSessionMode,
   type AcpSessionModeState,
   type AcpPermissionRequest,
@@ -51,6 +55,7 @@ export interface OmpAcpRuntimeInput extends Omit<
   readonly ompSettings: Pick<OmpSettings, "binaryPath" | "launchArgs"> | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
+  readonly openRouterRouting?: OmpOpenRouterRoutingPaths | undefined;
 }
 
 export interface OmpAcpModelSelectionErrorContext {
@@ -110,7 +115,9 @@ function requestedOmpModeId(modeState: AcpSessionModeState | undefined): string 
   );
 }
 
-export function applyOmpRequestedSessionConfiguration<E>(input: {
+export const applyOmpRequestedSessionConfiguration = Effect.fn(
+  "OmpAcp.applyRequestedSessionConfiguration",
+)(function* <E>(input: {
   readonly runtime: AcpSessionRuntime.AcpSessionRuntime["Service"];
   readonly modelSelection:
     | {
@@ -122,28 +129,26 @@ export function applyOmpRequestedSessionConfiguration<E>(input: {
     readonly cause: EffectAcpErrors.AcpError;
     readonly method: "session/set_config_option" | "session/set_mode" | "session/set_model";
   }) => E;
-}): Effect.Effect<void, E> {
-  return Effect.gen(function* () {
-    if (input.modelSelection) {
-      yield* applyOmpAcpModelSelection({
-        runtime: input.runtime,
-        model: input.modelSelection.model,
-        selections: input.modelSelection.options,
-        mapError: ({ cause, step }) =>
-          input.mapError({
-            cause,
-            method: step === "set-model" ? "session/set_model" : "session/set_config_option",
-          }),
-      });
-    }
+}): Effect.fn.Return<void, E> {
+  if (input.modelSelection) {
+    yield* applyOmpAcpModelSelection({
+      runtime: input.runtime,
+      model: input.modelSelection.model,
+      selections: input.modelSelection.options,
+      mapError: ({ cause, step }) =>
+        input.mapError({
+          cause,
+          method: step === "set-model" ? "session/set_model" : "session/set_config_option",
+        }),
+    });
+  }
 
-    const modeId = requestedOmpModeId(yield* input.runtime.getModeState);
-    if (!modeId) return;
-    yield* input.runtime
-      .setMode(modeId)
-      .pipe(Effect.mapError((cause) => input.mapError({ cause, method: "session/set_mode" })));
-  });
-}
+  const modeId = requestedOmpModeId(yield* input.runtime.getModeState);
+  if (!modeId) return;
+  yield* input.runtime
+    .setMode(modeId)
+    .pipe(Effect.mapError((cause) => input.mapError({ cause, method: "session/set_mode" })));
+});
 
 export function selectAutoApprovedOmpPermissionOption(
   request: EffectAcpSchema.RequestPermissionRequest,
@@ -354,6 +359,7 @@ export function buildOmpAcpSpawnInput(
   cwd: string,
   environment?: NodeJS.ProcessEnv,
   runtimeMode?: RuntimeMode,
+  openRouterRouting?: OmpOpenRouterRoutingPaths | undefined,
 ): AcpSessionRuntime.AcpSpawnInput {
   const configuredArgs = tokenizeCliArgs(ompSettings?.launchArgs);
   const launchArgs = runtimeMode
@@ -361,9 +367,20 @@ export function buildOmpAcpSpawnInput(
     : configuredArgs;
   return {
     command: ompSettings?.binaryPath?.trim() || "omp",
-    args: ["acp", ...launchArgs],
+    args: [
+      "acp",
+      ...launchArgs,
+      ...(openRouterRouting ? ["-e", openRouterRouting.extensionPath] : []),
+    ],
     cwd,
-    ...(environment ? { env: environment } : {}),
+    ...(environment || openRouterRouting
+      ? {
+          env: {
+            ...environment,
+            ...(openRouterRouting ? { [OMP_OPENROUTER_ROUTING_ENV]: openRouterRouting.dir } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -471,6 +488,7 @@ export function buildOmpTextGenerationAcpSpawnInput(
   cwd: string,
   sessionDir: string,
   environment?: NodeJS.ProcessEnv,
+  openRouterRouting?: OmpOpenRouterRoutingPaths | undefined,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
     command: ompSettings?.binaryPath?.trim() || "omp",
@@ -480,37 +498,44 @@ export function buildOmpTextGenerationAcpSpawnInput(
       "--session-dir",
       sessionDir,
       ...OMP_TEXT_GENERATION_ACP_ARGS,
+      ...(openRouterRouting ? ["-e", openRouterRouting.extensionPath] : []),
     ],
     cwd,
-    ...(environment ? { env: environment } : {}),
+    ...(environment || openRouterRouting
+      ? {
+          env: {
+            ...environment,
+            ...(openRouterRouting ? { [OMP_OPENROUTER_ROUTING_ENV]: openRouterRouting.dir } : {}),
+          },
+        }
+      : {}),
   };
 }
 
-const makeOmpAcpRuntimeWithSpawn = (
+const makeOmpAcpRuntimeWithSpawn = Effect.fn("OmpAcp.makeRuntime")(function* (
   input: OmpAcpRuntimeInput,
   spawn: AcpSessionRuntime.AcpSpawnInput,
-): Effect.Effect<
+): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
   Crypto.Crypto | Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const acpContext = yield* Layer.build(
-      AcpSessionRuntime.layer({
-        ...input,
-        spawn,
-        authMethodId: "agent",
-        clientCapabilities: { ...input.clientCapabilities, ...OMP_ACP_CLIENT_CAPABILITIES },
-      }).pipe(
-        Layer.provide(
-          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
-        ),
+> {
+  const acpContext = yield* Layer.build(
+    AcpSessionRuntime.layer({
+      ...input,
+      spawn,
+      authMethodId: "agent",
+      clientCapabilities: { ...input.clientCapabilities, ...OMP_ACP_CLIENT_CAPABILITIES },
+    }).pipe(
+      Layer.provide(
+        Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
       ),
-    );
-    return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
-      Effect.provide(acpContext),
-    );
-  });
+    ),
+  );
+  return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
+    Effect.provide(acpContext),
+  );
+});
 
 export const makeOmpAcpRuntime = (
   input: OmpAcpRuntimeInput,
@@ -521,7 +546,13 @@ export const makeOmpAcpRuntime = (
 > =>
   makeOmpAcpRuntimeWithSpawn(
     input,
-    buildOmpAcpSpawnInput(input.ompSettings, input.cwd, input.environment, input.runtimeMode),
+    buildOmpAcpSpawnInput(
+      input.ompSettings,
+      input.cwd,
+      input.environment,
+      input.runtimeMode,
+      input.openRouterRouting,
+    ),
   );
 
 export const makeOmpTextGenerationAcpRuntime = (
@@ -538,6 +569,7 @@ export const makeOmpTextGenerationAcpRuntime = (
       input.cwd,
       input.sessionDir,
       input.environment,
+      input.openRouterRouting,
     ),
   );
 
@@ -623,29 +655,29 @@ export function resolveOmpAcpConfigUpdates(
   return updates;
 }
 
-export function applyOmpAcpModelSelection<E>(input: {
+export const applyOmpAcpModelSelection = Effect.fn("OmpAcp.applyModelSelection")(function* <
+  E,
+>(input: {
   readonly runtime: OmpAcpModelSelectionRuntime;
   readonly model: string | null | undefined;
   readonly selections: ReadonlyArray<ProviderOptionSelection> | null | undefined;
   readonly mapError: (context: OmpAcpModelSelectionErrorContext) => E;
-}): Effect.Effect<void, E> {
-  return Effect.gen(function* () {
-    const model = input.model?.trim();
-    if (model && model !== "default") {
-      yield* input.runtime
-        .setModel(model)
-        .pipe(Effect.mapError((cause) => input.mapError({ cause, step: "set-model" })));
-    }
+}): Effect.fn.Return<void, E> {
+  const model = input.model?.trim();
+  if (model && model !== "default") {
+    yield* input.runtime
+      .setModel(model)
+      .pipe(Effect.mapError((cause) => input.mapError({ cause, step: "set-model" })));
+  }
 
-    const configOptions = yield* input.runtime.getConfigOptions;
-    for (const update of resolveOmpAcpConfigUpdates(configOptions, input.selections)) {
-      yield* input.runtime
-        .setConfigOption(update.configId, update.value)
-        .pipe(
-          Effect.mapError((cause) =>
-            input.mapError({ cause, step: "set-config-option", configId: update.configId }),
-          ),
-        );
-    }
-  });
-}
+  const configOptions = yield* input.runtime.getConfigOptions;
+  for (const update of resolveOmpAcpConfigUpdates(configOptions, input.selections)) {
+    yield* input.runtime
+      .setConfigOption(update.configId, update.value)
+      .pipe(
+        Effect.mapError((cause) =>
+          input.mapError({ cause, step: "set-config-option", configId: update.configId }),
+        ),
+      );
+  }
+});

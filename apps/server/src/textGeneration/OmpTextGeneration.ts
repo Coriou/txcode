@@ -17,6 +17,12 @@ import {
   applyOmpAcpModelSelection,
   makeOmpTextGenerationAcpRuntime,
 } from "../provider/acp/OmpAcpSupport.ts";
+import {
+  ompOpenRouterRoutingPaths,
+  openRouterUpstreamsFromSetting,
+  resolvePinnedUpstream,
+  writeOmpOpenRouterPin,
+} from "../provider/acp/OmpOpenRouterRouting.ts";
 
 const OMP_TIMEOUT_MS = 180_000;
 const isTextGenerationError = Schema.is(TextGenerationError);
@@ -29,6 +35,11 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
   const serverConfig = yield* ServerConfig;
+  const configuredUpstreams = openRouterUpstreamsFromSetting(ompSettings.openrouterUpstreams);
+  const openRouterRouting =
+    configuredUpstreams.length > 0
+      ? yield* ompOpenRouterRoutingPaths(serverConfig.stateDir)
+      : undefined;
 
   const imagePromptParts = Effect.fn("OmpTextGeneration.imagePromptParts")(function* (
     attachments: ReadonlyArray<ChatAttachment> | undefined,
@@ -58,6 +69,10 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
       const sessionDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3code-omp-text-session-",
       });
+      const upstream =
+        openRouterRouting === undefined
+          ? undefined
+          : resolvePinnedUpstream(modelSelection.options, configuredUpstreams);
       const runtime = yield* makeOmpTextGenerationAcpRuntime({
         ompSettings,
         environment,
@@ -65,6 +80,7 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
         cwd,
         sessionDir,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
+        ...(upstream === undefined ? {} : { openRouterRouting }),
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
       yield* runtime.handleSessionUpdate((notification) => {
@@ -80,7 +96,27 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
       );
 
       const promptResult = yield* Effect.gen(function* () {
-        yield* runtime.start();
+        const started = yield* runtime.start();
+        if (upstream !== undefined && openRouterRouting !== undefined) {
+          const pin = {
+            paths: openRouterRouting,
+            sessionId: started.sessionId,
+            model: modelSelection.model,
+          };
+          yield* Effect.acquireRelease(
+            writeOmpOpenRouterPin({ ...pin, upstream }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to write Oh My Pi OpenRouter pin", { cause }),
+              ),
+            ),
+            () =>
+              writeOmpOpenRouterPin({ ...pin, upstream: undefined }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Failed to clear Oh My Pi OpenRouter pin", { cause }),
+                ),
+              ),
+          );
+        }
         yield* applyOmpAcpModelSelection({
           runtime,
           model: modelSelection.model,

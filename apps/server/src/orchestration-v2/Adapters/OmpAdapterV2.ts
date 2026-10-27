@@ -4,8 +4,8 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import type * as FileSystem from "effect/FileSystem";
-import type * as Path from "effect/Path";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 import * as AcpErrors from "effect-acp/errors";
@@ -28,6 +28,15 @@ import {
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import * as ServerConfigModule from "../../config.ts";
+import {
+  openRouterUpstreamsFromSetting,
+  resolvePinnedUpstream,
+  ompOpenRouterRoutingPaths,
+  prepareOmpOpenRouterRouting,
+  writeOmpOpenRouterPin,
+  type OmpOpenRouterRoutingPaths,
+} from "../../provider/acp/OmpOpenRouterRouting.ts";
 import type * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import type * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
@@ -58,6 +67,13 @@ export interface OmpAdapterV2Options extends Omit<
   readonly environment: NodeJS.ProcessEnv;
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly makeRuntime?: AcpAdapterV2Flavor["makeRuntime"];
+  readonly openRouterRouting?: OmpOpenRouterRoutingPaths | undefined;
+  /** Pin writer; the adapter must not depend on the filesystem service. */
+  readonly writeRoutingPin?: (input: {
+    readonly sessionId: string;
+    readonly model: string;
+    readonly upstream: string | undefined;
+  }) => Effect.Effect<void>;
 }
 
 /** Count root assistant output on the native transport, including frames before RPC settlement. */
@@ -114,6 +130,8 @@ function withOmpCompletionCheck(runtime: AcpSessionRuntime.AcpSessionRuntime["Se
 
 /** @public */
 export function makeOmpAcpAdapterFlavor(options: OmpAdapterV2Options): AcpAdapterV2Flavor {
+  // A stored pin the settings no longer offer must not keep routing requests.
+  const configuredUpstreams = openRouterUpstreamsFromSetting(options.settings.openrouterUpstreams);
   return {
     driver: OMP_PROVIDER,
     runtimeHarness: "Oh My Pi",
@@ -147,18 +165,32 @@ export function makeOmpAcpAdapterFlavor(options: OmpAdapterV2Options): AcpAdapte
         content: (answers) => buildOmpElicitationContent(questions, answers),
       };
     },
-    applyModelSelection: ({ runtime, modelSelection }) =>
+    applyModelSelection: ({ runtime, startResult, modelSelection }) =>
       applyOmpRequestedSessionConfiguration({
         runtime,
         modelSelection,
         mapError: ({ cause }) => cause,
-      }).pipe(Effect.as(modelSelection.model === "default" ? undefined : modelSelection.model)),
+      }).pipe(
+        Effect.tap(() =>
+          options.writeRoutingPin === undefined
+            ? Effect.void
+            : options.writeRoutingPin({
+                sessionId: startResult.sessionId,
+                model: modelSelection.model,
+                upstream: resolvePinnedUpstream(modelSelection.options, configuredUpstreams),
+              }),
+        ),
+        Effect.as(modelSelection.model === "default" ? undefined : modelSelection.model),
+      ),
     makeRuntime: (input) =>
       (
         options.makeRuntime?.(input) ??
         makeOmpAcpRuntime({
           ...input,
           ompSettings: options.settings,
+          ...(options.openRouterRouting === undefined
+            ? {}
+            : { openRouterRouting: options.openRouterRouting }),
           environment: { ...options.environment, ...input.processEnvironment },
           runtimeMode:
             input.runtimePolicy.approvalPolicy === undefined &&
@@ -188,6 +220,7 @@ export const makeOmpAdapterV2 = Effect.fn("makeOmpAdapterV2")(function* (
 });
 
 export type OmpAdapterV2DriverEnv =
+  | ServerConfigModule.ServerConfig
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -196,6 +229,52 @@ export type OmpAdapterV2DriverEnv =
   | ProviderEventLoggers.ProviderEventLoggers
   | ProviderHost.ProviderHost
   | McpProviderSessions.McpProviderSessions;
+
+/**
+ * OpenRouter routing is opt-in: with no upstreams configured nothing is spawned
+ * or loaded, so OMP keeps its stock behaviour. A state dir that cannot hold the
+ * artifacts disables the feature instead of failing the whole provider.
+ */
+const prepareOpenRouterRouting = Effect.fn("OmpAdapterV2.prepareOpenRouterRouting")(function* (
+  setting: string | null | undefined,
+): Effect.fn.Return<
+  Pick<OmpAdapterV2Options, "openRouterRouting" | "writeRoutingPin">,
+  never,
+  ServerConfigModule.ServerConfig | FileSystem.FileSystem | Path.Path
+> {
+  if (openRouterUpstreamsFromSetting(setting).length === 0) return {};
+  const serverConfig = yield* ServerConfigModule.ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const openRouterRouting = yield* ompOpenRouterRoutingPaths(serverConfig.stateDir);
+  const prepared = yield* Effect.result(prepareOmpOpenRouterRouting(openRouterRouting));
+  if (prepared._tag === "Failure") {
+    yield* Effect.logWarning(
+      "Disabling Oh My Pi OpenRouter routing: routing artifacts unavailable",
+      {
+        cause: prepared.failure,
+      },
+    );
+    return {};
+  }
+  return {
+    openRouterRouting,
+    // A failed pin write leaves the turn unpinned; failing the turn over a
+    // filesystem hiccup is worse, and the warning names the cause.
+    writeRoutingPin: (pin: {
+      readonly sessionId: string;
+      readonly model: string;
+      readonly upstream: string | undefined;
+    }) =>
+      writeOmpOpenRouterPin({ paths: openRouterRouting, ...pin }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Failed to write Oh My Pi OpenRouter pin", { cause }),
+        ),
+      ),
+  };
+});
 
 export const OmpAdapterV2Driver: ProviderAdapterDriver<OmpSettings, OmpAdapterV2DriverEnv> = {
   driverKind: OMP_PROVIDER,
@@ -206,7 +285,9 @@ export const OmpAdapterV2Driver: ProviderAdapterDriver<OmpSettings, OmpAdapterV2
       const hostEnvironment = yield* HostProcess.Environment;
       const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
+      const routing = yield* prepareOpenRouterRouting(input.config.openrouterUpstreams);
       return yield* makeOmpAdapterV2({
+        ...routing,
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
         environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),

@@ -80,6 +80,53 @@ describe("OMP model catalog", () => {
     ]);
   });
 
+  it("offers an upstream pin on OpenRouter models only", () => {
+    const models = buildOmpModelsFromJson(
+      {
+        models: [
+          {
+            provider: "openrouter",
+            id: "z-ai/glm-5.3-flash",
+            selector: "openrouter/z-ai/glm-5.3-flash",
+            name: "GLM 5.3 Flash",
+            thinking: ["low", "max"],
+          },
+          {
+            provider: "anthropic",
+            id: "claude-sonnet-5",
+            selector: "anthropic/claude-sonnet-5",
+            name: "Claude Sonnet 5",
+            thinking: null,
+          },
+        ],
+      },
+      { openRouterUpstreams: ["deepinfra", "cerebras"] },
+    );
+
+    expect(models[0]?.capabilities?.optionDescriptors?.map((descriptor) => descriptor.id)).toEqual([
+      "thinking",
+      "openrouterUpstream",
+    ]);
+    expect(models[0]?.capabilities?.optionDescriptors?.[1]).toEqual({
+      id: "openrouterUpstream",
+      label: "Upstream",
+      type: "select",
+      description: "Pin the OpenRouter provider that serves this model.",
+      currentValue: "auto",
+      options: [
+        {
+          id: "auto",
+          label: "Auto",
+          description: "Let OpenRouter route the request",
+          isDefault: true,
+        },
+        { id: "deepinfra", label: "deepinfra" },
+        { id: "cerebras", label: "cerebras" },
+      ],
+    });
+    expect(models[1]?.capabilities?.optionDescriptors).toEqual([]);
+  });
+
   it("rejects malformed JSON and only preserves configured model catalog arguments", () => {
     expect(parseOmpModelsJson("not json")).toBeUndefined();
     expect(parseOmpModelsJson('{"unexpected":[]}')).toEqual([]);

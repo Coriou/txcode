@@ -1,6 +1,7 @@
 import {
   type ModelCapabilities,
   type OmpSettings,
+  type ProviderOptionDescriptor,
   type ServerProviderModel,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -29,6 +30,11 @@ import type { ProviderMaintenanceCapabilities } from "@t3tools/provider-core/ser
 import { enrichProviderSnapshotWithVersionAdvisory } from "@t3tools/provider-core/server/maintenanceResolver";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { ompProfileFromLaunchArgs } from "./acp/OmpAcpSupport.ts";
+import {
+  OMP_OPENROUTER_UPSTREAM_AUTO,
+  OMP_OPENROUTER_UPSTREAM_OPTION_ID,
+  openRouterUpstreamsFromSetting,
+} from "./acp/OmpOpenRouterRouting.ts";
 
 /** @public */
 export const OMP_PRESENTATION = {
@@ -100,10 +106,11 @@ function thinkingLabel(value: string): string {
 function ompModelCapabilities(
   thinking: ReadonlyArray<string>,
   defaultThinking: string | undefined,
+  openRouterUpstreams: ReadonlyArray<string>,
 ): ModelCapabilities {
-  if (thinking.length === 0) return EMPTY_CAPABILITIES;
-  return createModelCapabilities({
-    optionDescriptors: [
+  const optionDescriptors: Array<ProviderOptionDescriptor> = [];
+  if (thinking.length > 0) {
+    optionDescriptors.push(
       buildSelectOptionDescriptor({
         id: "thinking",
         label: "Thinking",
@@ -113,13 +120,35 @@ function ompModelCapabilities(
           ...(value === defaultThinking ? { isDefault: true } : {}),
         })),
       }),
-    ],
-  });
+    );
+  }
+  if (openRouterUpstreams.length > 0) {
+    optionDescriptors.push(
+      buildSelectOptionDescriptor({
+        id: OMP_OPENROUTER_UPSTREAM_OPTION_ID,
+        label: "Upstream",
+        description: "Pin the OpenRouter provider that serves this model.",
+        options: [
+          {
+            value: OMP_OPENROUTER_UPSTREAM_AUTO,
+            label: "Auto",
+            description: "Let OpenRouter route the request",
+            isDefault: true,
+          },
+          ...openRouterUpstreams.map((value) => ({ value, label: value })),
+        ],
+      }),
+    );
+  }
+  return optionDescriptors.length === 0
+    ? EMPTY_CAPABILITIES
+    : createModelCapabilities({ optionDescriptors });
 }
 
 export interface OmpModelCatalogDefaults {
   readonly defaultModelRole?: string | undefined;
   readonly defaultThinking?: string | undefined;
+  readonly openRouterUpstreams?: ReadonlyArray<string> | undefined;
 }
 
 /** Parses the documented `omp models --json` catalog without trusting malformed entries. */
@@ -167,6 +196,7 @@ export function buildOmpModelsFromJson(
           selector === defaultSelector
             ? (roleThinking ?? defaults.defaultThinking)
             : defaults.defaultThinking,
+          provider === "openrouter" ? (defaults.openRouterUpstreams ?? []) : [],
         ),
       } satisfies ServerProviderModel,
     ];
@@ -433,6 +463,7 @@ export const checkOmpProviderStatus = Effect.fn("checkOmpProviderStatus")(functi
   const discoveredModels = parseOmpModelsJson(modelsResult.stdout, {
     defaultModelRole: trimmedString(asRecord(configDefaults.modelRoles)?.default),
     defaultThinking: trimmedString(configDefaults.defaultThinking),
+    openRouterUpstreams: openRouterUpstreamsFromSetting(settings.openrouterUpstreams),
   });
   if (!discoveredModels) {
     return buildServerProvider({
