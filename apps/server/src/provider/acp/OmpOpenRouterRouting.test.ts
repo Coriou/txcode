@@ -12,6 +12,7 @@ import {
   openRouterUpstreamFromSelection,
   openRouterUpstreamsFromSetting,
   prepareOmpOpenRouterRouting,
+  resolvePinnedUpstream,
   writeOmpOpenRouterPin,
 } from "./OmpOpenRouterRouting.ts";
 
@@ -36,6 +37,13 @@ describe("OpenRouter upstream selection", () => {
         { id: "openrouterUpstream", value: " DeepInfra " },
       ]),
     ).toBe("deepinfra");
+  });
+
+  it("drops a stored pin the instance no longer offers", () => {
+    const selections = [{ id: "openrouterUpstream", value: "deepinfra" }];
+    expect(resolvePinnedUpstream(selections, ["cerebras"])).toBeUndefined();
+    expect(resolvePinnedUpstream(selections, ["deepinfra"])).toBe("deepinfra");
+    expect(resolvePinnedUpstream([], ["deepinfra"])).toBeUndefined();
   });
 
   it("treats auto and unrelated selections as unpinned", () => {

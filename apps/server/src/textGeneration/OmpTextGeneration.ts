@@ -35,11 +35,11 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
   const serverConfig = yield* ServerConfig;
+  const configuredUpstreams = openRouterUpstreamsFromSetting(ompSettings.openrouterUpstreams);
   const openRouterRouting =
-    openRouterUpstreamsFromSetting(ompSettings.openrouterUpstreams).length > 0
+    configuredUpstreams.length > 0
       ? yield* ompOpenRouterRoutingPaths(serverConfig.stateDir)
       : undefined;
-  const configuredUpstreams = openRouterUpstreamsFromSetting(ompSettings.openrouterUpstreams);
 
   const imagePromptParts = Effect.fn("OmpTextGeneration.imagePromptParts")(function* (
     attachments: ReadonlyArray<ChatAttachment> | undefined,
@@ -101,15 +101,23 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
       const promptResult = yield* Effect.gen(function* () {
         const started = yield* runtime.start();
         if (upstream !== undefined && openRouterRouting !== undefined) {
-          yield* writeOmpOpenRouterPin({
+          const pin = {
             paths: openRouterRouting,
             sessionId: started.sessionId,
             model: modelSelection.model,
-            upstream,
-          }).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to write Oh My Pi OpenRouter pin", { cause }),
+          };
+          yield* Effect.acquireRelease(
+            writeOmpOpenRouterPin({ ...pin, upstream }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to write Oh My Pi OpenRouter pin", { cause }),
+              ),
             ),
+            () =>
+              writeOmpOpenRouterPin({ ...pin, upstream: undefined }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Failed to clear Oh My Pi OpenRouter pin", { cause }),
+                ),
+              ),
           );
         }
         yield* applyOmpAcpModelSelection({

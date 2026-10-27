@@ -25,6 +25,18 @@ describe("buildOmpAcpSpawnInput", () => {
     });
   });
 
+  it("leaves the OMP command untouched when OpenRouter routing is not configured", () => {
+    const spawn = buildOmpAcpSpawnInput(
+      { binaryPath: "omp", launchArgs: "" },
+      "/tmp/project",
+      { PATH: "/usr/bin" },
+      "auto",
+      undefined,
+    );
+    expect(spawn.args).not.toContain("-e");
+    expect(spawn.env).not.toHaveProperty("T3_OMP_ROUTING_DIR");
+  });
+
   it("loads the OpenRouter routing extension and points it at the pin directory", () => {
     expect(
       buildOmpAcpSpawnInput(

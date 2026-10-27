@@ -67,6 +67,15 @@ export function openRouterUpstreamFromSelection(
   return undefined;
 }
 
+/** A stored pin only counts while the instance still offers that upstream. */
+export function resolvePinnedUpstream(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  configuredUpstreams: ReadonlyArray<string>,
+): string | undefined {
+  const upstream = openRouterUpstreamFromSelection(selections);
+  return upstream !== undefined && configuredUpstreams.includes(upstream) ? upstream : undefined;
+}
+
 export function ompOpenRouterPinFileName(sessionId: string): string {
   return `${encodeURIComponent(sessionId)}.pin`;
 }

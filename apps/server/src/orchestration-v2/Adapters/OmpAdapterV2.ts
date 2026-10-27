@@ -30,8 +30,8 @@ import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEve
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as ServerConfigModule from "../../config.ts";
 import {
-  openRouterUpstreamFromSelection,
   openRouterUpstreamsFromSetting,
+  resolvePinnedUpstream,
   ompOpenRouterRoutingPaths,
   prepareOmpOpenRouterRouting,
   writeOmpOpenRouterPin,
@@ -177,12 +177,7 @@ export function makeOmpAcpAdapterFlavor(options: OmpAdapterV2Options): AcpAdapte
             : options.writeRoutingPin({
                 sessionId: startResult.sessionId,
                 model: modelSelection.model,
-                upstream: (() => {
-                  const upstream = openRouterUpstreamFromSelection(modelSelection.options);
-                  return upstream !== undefined && configuredUpstreams.includes(upstream)
-                    ? upstream
-                    : undefined;
-                })(),
+                upstream: resolvePinnedUpstream(modelSelection.options, configuredUpstreams),
               }),
         ),
         Effect.as(modelSelection.model === "default" ? undefined : modelSelection.model),
