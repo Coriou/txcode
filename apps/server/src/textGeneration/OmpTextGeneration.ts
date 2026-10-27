@@ -19,8 +19,8 @@ import {
 } from "../provider/acp/OmpAcpSupport.ts";
 import {
   ompOpenRouterRoutingPaths,
-  openRouterUpstreamFromSelection,
   openRouterUpstreamsFromSetting,
+  resolvePinnedUpstream,
   writeOmpOpenRouterPin,
 } from "../provider/acp/OmpOpenRouterRouting.ts";
 
@@ -69,13 +69,10 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
       const sessionDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3code-omp-text-session-",
       });
-      const selectedUpstream = openRouterUpstreamFromSelection(modelSelection.options);
       const upstream =
-        openRouterRouting !== undefined &&
-        selectedUpstream !== undefined &&
-        configuredUpstreams.includes(selectedUpstream)
-          ? selectedUpstream
-          : undefined;
+        openRouterRouting === undefined
+          ? undefined
+          : resolvePinnedUpstream(modelSelection.options, configuredUpstreams);
       const runtime = yield* makeOmpTextGenerationAcpRuntime({
         ompSettings,
         environment,
