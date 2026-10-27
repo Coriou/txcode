@@ -36,6 +36,7 @@ function selectEnvironment(config: ServerConfig) {
     ),
     machineKind: resolveEnvironmentMachineKind(config),
     capabilities: config.environment.capabilities,
+    snoozeSpacingMinutes: config.settings.snoozeSpacingMinutes,
   };
 }
 
@@ -71,9 +72,11 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
   const pinReorderEnvironmentIds = new Set<EnvironmentId>();
   const activeReorderEnvironmentIds = new Set<EnvironmentId>();
   const titleRegenerationEnvironmentIds = new Set<EnvironmentId>();
-  for (const [id, { providers, machineKind, capabilities }] of environments) {
+  const snoozeSpacingMinutesByEnvironment = new Map<EnvironmentId, number>();
+  for (const [id, { providers, machineKind, capabilities, snoozeSpacingMinutes }] of environments) {
     providersByEnvironmentId.set(id, providers);
     machineByEnvironmentId.set(id, machineKind);
+    snoozeSpacingMinutesByEnvironment.set(id, snoozeSpacingMinutes);
     if (capabilities.threadSettlement === true) settlementEnvironmentIds.add(id);
     if (capabilities.threadSnooze === true) snoozeEnvironmentIds.add(id);
     if (capabilities.threadAutoSettleOptOut === true) autoSettleOptOutEnvironmentIds.add(id);
@@ -92,6 +95,7 @@ function collectEnvironments(environments: ReadonlyMap<EnvironmentId, ListEnviro
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
+    snoozeSpacingMinutesByEnvironment,
   };
 }
 
@@ -114,6 +118,7 @@ export function createThreadListEnvironmentsAtom(
         prior &&
         prior.providers === selected.providers &&
         prior.machineKind === selected.machineKind &&
+        prior.snoozeSpacingMinutes === selected.snoozeSpacingMinutes &&
         capabilityKeys.every(
           (key) => (prior.capabilities[key] === true) === (selected.capabilities[key] === true),
         );

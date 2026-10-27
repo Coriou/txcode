@@ -10,6 +10,11 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import {
+  MAX_SNOOZE_SPACING_MINUTES,
+  MIN_SNOOZE_SPACING_MINUTES,
+} from "@t3tools/contracts/settings";
+import { NumberField } from "../../components/ui/NumberField";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 import { AppText as Text } from "../../components/ui/AppText";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
@@ -90,6 +95,7 @@ function AutoSettleSettingsRows() {
     patch: Partial<AutoSettleSettings> & {
       autoResumeLimitedThreads?: boolean;
       snoozeLimitedThreads?: boolean;
+      snoozeSpacingMinutes?: number;
     },
   ) => {
     if (
@@ -176,22 +182,40 @@ function AutoSettleSettingsRows() {
         />
       ) : null}
       {!projectSelected ? (
-        <SettingsSection title="Usage limits">
-          <SettingsSwitchRow
-            icon="clock"
-            label="Resume after usage limits"
-            value={uniformMobileSetting(displayTargets, "autoResumeLimitedThreads")}
-            disabled={disabled}
-            onValueChange={(value) => writeToAll({ autoResumeLimitedThreads: value })}
-          />
-          <SettingsSwitchRow
-            icon="clock"
-            label="Snooze until limits reset"
-            value={uniformMobileSetting(displayTargets, "snoozeLimitedThreads")}
-            disabled={disabled}
-            onValueChange={(value) => writeToAll({ snoozeLimitedThreads: value })}
-          />
-        </SettingsSection>
+        <>
+          <SettingsSection title="Usage limits">
+            <SettingsSwitchRow
+              icon="clock"
+              label="Resume after usage limits"
+              value={uniformMobileSetting(displayTargets, "autoResumeLimitedThreads")}
+              disabled={disabled}
+              onValueChange={(value) => writeToAll({ autoResumeLimitedThreads: value })}
+            />
+            <SettingsSwitchRow
+              icon="clock"
+              label="Snooze until limits reset"
+              value={uniformMobileSetting(displayTargets, "snoozeLimitedThreads")}
+              disabled={disabled}
+              onValueChange={(value) => writeToAll({ snoozeLimitedThreads: value })}
+            />
+          </SettingsSection>
+          <SettingsSection title="Snoozes">
+            <View className="flex-row items-center gap-4 px-4 py-4 android:min-h-14 android:py-3">
+              <Text className="flex-1 text-foreground text-lg android:text-base">
+                Space snoozes by
+              </Text>
+              <NumberField
+                value={referenceSettings.snoozeSpacingMinutes}
+                disabled={disabled}
+                onValueChange={(value) => writeToAll({ snoozeSpacingMinutes: value })}
+                min={MIN_SNOOZE_SPACING_MINUTES}
+                max={MAX_SNOOZE_SPACING_MINUTES}
+                label="Minutes between snoozes"
+                formatValue={(value) => (value === 0 ? "Off" : `${value} min`)}
+              />
+            </View>
+          </SettingsSection>
+        </>
       ) : null}
       <SettingsSection title="Auto-settle">
         <SettingsSwitchRow

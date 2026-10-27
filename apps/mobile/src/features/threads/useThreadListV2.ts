@@ -1,4 +1,6 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
+import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { selectSnoozeOccupancy } from "@t3tools/client-runtime/state/snooze-spacing";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useSyncExternalStore } from "react";
 
@@ -146,6 +148,19 @@ export function useThreadListV2(input: {
         )) &&
       (searchQuery.length === 0 || pendingTask.title.toLocaleLowerCase().includes(searchQuery)),
   );
+  // Rows read one occupancy value; keying it on reservations keeps unrelated
+  // shell updates from re-rendering every row that offers a snooze menu.
+  const reservationKey = threads
+    .flatMap((thread) =>
+      effectiveSnoozed(thread, { now: input.now }) ? [thread.snoozedUntil ?? ""] : [],
+    )
+    .sort()
+    .join("\n");
+  const snoozeOccupancy = useMemo(
+    // oxlint-disable-next-line react/memo-dependencies -- reservations are the only input that changes the result
+    () => selectSnoozeOccupancy(threads, { now: input.now }),
+    [reservationKey],
+  );
   const items = buildThreadListV2ListItems({
     items: layout.items,
     pendingTasks,
@@ -164,7 +179,7 @@ export function useThreadListV2(input: {
     moveAvailability,
     shelfPreferencesLoading: !input.shelfPreferencesLoaded,
   });
-  return { layout, items, contentOnlyThreadKeys, olderSettledShelf };
+  return { layout, items, contentOnlyThreadKeys, olderSettledShelf, snoozeOccupancy };
 }
 
 /** The list's scope per environment: its projects there, or every project. */

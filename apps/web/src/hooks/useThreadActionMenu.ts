@@ -8,8 +8,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { selectSnoozeOccupancy } from "@t3tools/client-runtime/state/snooze-spacing";
 import {
   AuthOrchestrationOperateScope,
+  DEFAULT_SERVER_SETTINGS,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -33,6 +35,8 @@ import {
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
   useProjects,
+  useQuietThreadShells,
+  useServerConfigs,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { readLocalApi } from "../localApi";
@@ -67,6 +71,8 @@ export function useThreadActionMenu(input: {
   const { threadRef, projectCwd, onStartRename, canShareWithGuest } = input;
   const router = useRouter();
   const projects = useProjects();
+  const quietThreads = useQuietThreadShells();
+  const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const logicalProjectKeyByPhysicalKey = buildPhysicalToLogicalProjectKeyMap({
@@ -129,7 +135,16 @@ export function useThreadActionMenu(input: {
         titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
-      const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+      const snoozePresets = resolveSnoozePresets(now, timestampFormat, {
+        occupied: selectSnoozeOccupancy(quietThreads, {
+          now: now.toISOString(),
+          exclude: (candidate) =>
+            candidate.id === thread.id && candidate.environmentId === thread.environmentId,
+        }),
+        spacingMinutes:
+          serverConfigs.get(thread.environmentId)?.settings.snoozeSpacingMinutes ??
+          DEFAULT_SERVER_SETTINGS.snoozeSpacingMinutes,
+      });
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         branch: thread.branch ?? null,

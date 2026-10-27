@@ -11,6 +11,7 @@ import {
 } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
+import { DEFAULT_SNOOZE_SPACING_MINUTES } from "@t3tools/contracts/settings";
 import { useAtomValue } from "@effect/atom-react";
 import { useFocusEffect } from "@react-navigation/native";
 import { use, useEffect, useRef, useState, type ComponentProps } from "react";
@@ -443,6 +444,7 @@ export function HomeScreen(props: HomeScreenProps) {
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
+    snoozeSpacingMinutesByEnvironment,
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   const pendingOrder = usePendingThreadOrder(nowMinute, snoozeWakeTick);
@@ -451,6 +453,7 @@ export function HomeScreen(props: HomeScreenProps) {
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    snoozeOccupancy,
   } = useThreadListV2({
     threads: props.threads,
     pendingTasks: props.pendingTasks,
@@ -587,6 +590,11 @@ export function HomeScreen(props: HomeScreenProps) {
         pinned={item.item.pinned}
         wokeAt={item.item.wokeAt}
         snoozePresetMinute={item.snoozePresetMinute ?? ""}
+        snoozeOccupancy={snoozeOccupancy}
+        snoozeSpacingMinutes={
+          snoozeSpacingMinutesByEnvironment.get(thread.environmentId) ??
+          DEFAULT_SNOOZE_SPACING_MINUTES
+        }
         snoozeWakeLabelText={item.snoozeWakeLabelText}
         timeLabel={item.timeLabel}
         showTrailingDivider={item.showTrailingDivider}

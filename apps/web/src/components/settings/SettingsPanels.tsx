@@ -16,7 +16,9 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   type DiffLayout,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+  MAX_SNOOZE_SPACING_MINUTES,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+  MIN_SNOOZE_SPACING_MINUTES,
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
@@ -471,6 +473,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze until limits reset"]
       : []),
+    ...(settings.snoozeSpacingMinutes !== DEFAULT_UNIFIED_SETTINGS.snoozeSpacingMinutes
+      ? ["Space snoozes by"]
+      : []),
     ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
     ...(settings.persistComposerContextStrip !==
     DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
@@ -634,6 +639,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      snoozeSpacingMinutes: DEFAULT_UNIFIED_SETTINGS.snoozeSpacingMinutes,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
@@ -682,12 +688,18 @@ export function useSettingsRestore(onRestored?: () => void) {
 
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
-function AutoSettleDaysInput({
+function NumberSettingInput({
   value,
+  min,
+  max,
+  ariaLabel,
   onCommit,
 }: {
   value: number;
-  onCommit: (days: number) => void;
+  min: number;
+  max: number;
+  ariaLabel: string;
+  onCommit: (value: number) => void;
 }) {
   const [draft, setDraft] = useState(String(value));
   const [draftSource, setDraftSource] = useState(value);
@@ -700,23 +712,19 @@ function AutoSettleDaysInput({
     <Input
       size="sm"
       type="number"
-      min={MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
-      max={MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
+      min={min}
+      max={max}
       className="w-full sm:w-24"
       value={draft}
       onChange={(event) => {
         setDraft(event.target.value);
         const parsed = Number(event.target.value);
-        if (
-          Number.isInteger(parsed) &&
-          parsed >= MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS &&
-          parsed <= MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS
-        ) {
+        if (Number.isInteger(parsed) && parsed >= min && parsed <= max) {
           onCommit(parsed);
         }
       }}
       onBlur={() => setDraft(String(value))}
-      aria-label="Days of inactivity before auto-settle"
+      aria-label={ariaLabel}
     />
   );
 }
@@ -992,6 +1000,34 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           serverScoped
+          {...searchableSetting("snooze-spacing")}
+          description="Snoozes that would wake together land this many minutes apart, up to an hour. 0 turns it off."
+          settingKeys={["snoozeSpacingMinutes"]}
+          resetAction={
+            settings.snoozeSpacingMinutes !== DEFAULT_UNIFIED_SETTINGS.snoozeSpacingMinutes ? (
+              <SettingResetButton
+                label="snooze spacing"
+                onClick={() =>
+                  updateSettings({
+                    snoozeSpacingMinutes: DEFAULT_UNIFIED_SETTINGS.snoozeSpacingMinutes,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <NumberSettingInput
+              value={settings.snoozeSpacingMinutes}
+              min={MIN_SNOOZE_SPACING_MINUTES}
+              max={MAX_SNOOZE_SPACING_MINUTES}
+              ariaLabel="Minutes between snoozes"
+              onCommit={(minutes) => updateSettings({ snoozeSpacingMinutes: minutes })}
+            />
+          }
+        />
+
+        <SettingsRow
+          serverScoped
           settingKeys={["idleCompaction", "compactIdleThreads"]}
           mixed={idleCompaction.mixed}
           {...searchableSetting("compact-idle-threads")}
@@ -1111,8 +1147,11 @@ export function GeneralSettingsPanel() {
                 title={searchableSetting("days-before-auto-settle").title}
                 description="Any new activity un-settles a thread automatically."
                 control={
-                  <AutoSettleDaysInput
+                  <NumberSettingInput
                     value={settings.sidebarAutoSettleAfterDays}
+                    min={MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
+                    max={MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
+                    ariaLabel="Days of inactivity before auto-settle"
                     onCommit={(days) => updateSettings({ sidebarAutoSettleAfterDays: days })}
                   />
                 }

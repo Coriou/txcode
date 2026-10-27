@@ -343,6 +343,10 @@
       "types": "./src/state/threadSettled.ts",
       "default": "./src/state/threadSettled.ts"
     },
+    "./state/snooze-spacing": {
+      "types": "./src/state/snoozeSpacing.ts",
+      "default": "./src/state/snoozeSpacing.ts"
+    },
     "./state/thread-search": {
       "types": "./src/state/threadSearch.ts",
       "default": "./src/state/threadSearch.ts"

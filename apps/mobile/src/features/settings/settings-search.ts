@@ -37,6 +37,8 @@ const SETTINGS_SEARCH_TERMS = {
     "auto-settle",
     "settle",
     "snooze",
+    "snooze spacing",
+    "stagger snoozes",
     "usage limits",
     "auto-resume",
     "plan mode",
