@@ -488,6 +488,7 @@ export function buildOmpTextGenerationAcpSpawnInput(
   cwd: string,
   sessionDir: string,
   environment?: NodeJS.ProcessEnv,
+  openRouterRouting?: OmpOpenRouterRoutingPaths | undefined,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
     command: ompSettings?.binaryPath?.trim() || "omp",
@@ -497,9 +498,17 @@ export function buildOmpTextGenerationAcpSpawnInput(
       "--session-dir",
       sessionDir,
       ...OMP_TEXT_GENERATION_ACP_ARGS,
+      ...(openRouterRouting ? ["-e", openRouterRouting.extensionPath] : []),
     ],
     cwd,
-    ...(environment ? { env: environment } : {}),
+    ...(environment || openRouterRouting
+      ? {
+          env: {
+            ...environment,
+            ...(openRouterRouting ? { [OMP_OPENROUTER_ROUTING_ENV]: openRouterRouting.dir } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -560,6 +569,7 @@ export const makeOmpTextGenerationAcpRuntime = (
       input.cwd,
       input.sessionDir,
       input.environment,
+      input.openRouterRouting,
     ),
   );
 

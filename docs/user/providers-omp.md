@@ -64,10 +64,12 @@ choose one, list the upstreams you use under **Settings → Providers → Oh My 
 upstreams**, comma-separated, for example `deepinfra, cerebras`.
 
 OpenRouter models then show an **Upstream** control beside **Thinking** in the composer. **Auto**
-keeps OpenRouter's own routing; picking a provider pins that thread's requests to it, including
-after the thread is resumed. A change applies from the next request on, and the selection is stored
-with the thread, so another device sees the same pin.
+keeps OpenRouter's own routing; picking a provider pins that thread's requests for that model to it,
+including after the thread is resumed and for delegated work that runs the same model. A change
+applies from the next message, and the selection is stored with the thread, so another device sees
+the same pin.
 
-Tx Code applies the pin with a small OMP extension it regenerates under
-`<state dir>/omp-openrouter-routing`; your OMP configuration and `models.yml` are not modified. The
-pin only applies to models that OMP routes through its `openrouter` provider.
+A pin is a hard restriction: if the chosen upstream does not serve the model, OpenRouter rejects the
+request instead of falling back. Pick **Auto** to restore OpenRouter's routing. Tx Code applies the
+pin through a small OMP extension it generates itself; your OMP configuration and `models.yml` are
+not modified.
