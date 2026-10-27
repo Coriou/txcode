@@ -925,7 +925,6 @@ export const OmpSettings = makeProviderSettingsSchema(
         description:
           "Comma-separated OpenRouter provider slugs offered as an upstream pin on Oh My Pi OpenRouter models (for example deepinfra, cerebras). Leave empty to hide the pin.",
         providerSettingsForm: {
-          control: "textarea",
           placeholder: "deepinfra, cerebras",
           clearWhenEmpty: "omit",
         },
