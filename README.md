@@ -4,12 +4,12 @@ Tx Code is a community fork of [T3 Code](https://github.com/pingdotgg/t3code), a
 running coding agents on your machine. It stays close to upstream and adds a small set of
 features that are not in T3 Code (yet):
 
-| Feature                         | Status                                       | Upstream                                               |
-| ------------------------------- | -------------------------------------------- | ------------------------------------------------------ |
-| Oh My Pi provider               | Shipped                                      | Not tracked                                            |
-| Thread notifications            | Upstream delivery; fork event/focus controls | [Guide](docs/user/notifications.md)                    |
-| Cross-environment drift warning | Shipped                                      | Not tracked                                            |
-| Product analytics (PostHog)     | Disabled                                     | [#8481](https://github.com/pingdotgg/t3code/pull/8481) |
+| Feature                         | Status   | Upstream                                                |
+| ------------------------------- | -------- | ------------------------------------------------------- |
+| Oh My Pi provider               | Shipped  | Not tracked                                             |
+| Cross-environment drift warning | Shipped  | Not tracked                                             |
+| Snooze spacing                  | Shipped  | [Guide](docs/user/thread-sidebar.md#snooze-until-later) |
+| Product analytics (PostHog)     | Disabled | [#8481](https://github.com/pingdotgg/t3code/pull/8481)  |
 
 The fork merges `upstream/main` on a rolling basis and prefers upstream over the fork: when a
 feature lands in T3 Code and meets the same bar, it is imported and the fork version dropped.
