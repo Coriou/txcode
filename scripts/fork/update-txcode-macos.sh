@@ -15,7 +15,7 @@ backup/swap, and launch. Every answer defaults to abort; only y or yes accepts.
 The downloaded disk image is deleted when the script exits, including after an
 abort or a failed check. A copy that was already staged is kept.
 Backups live in ~/Library/Application Support/txcode-desktop-backups.
-The three newest complete snapshots are kept; incomplete backups are retained.
+The newest complete snapshot is kept; incomplete backups are retained.
 Rollback asks for a snapshot id, copies the current app and data into a complete
 quarantine, and only then replaces them. An interrupted swap renames the previous
 app to Tx Code.app.aside (or the Nightly name). The next run puts that aside back
@@ -255,13 +255,13 @@ validate_manifest() {
 }
 prune_plan() {
   complete_ids > "$tmp/complete-list" || fail 'Cannot enumerate safe backups.'
-  # The pending snapshot will occupy one of the three retained slots.
-  sed -n '3,$p' "$tmp/complete-list" > "$tmp/prune-list"
+  # The snapshot about to be written is the one complete backup that is kept.
+  sed -n '1,$p' "$tmp/complete-list" > "$tmp/prune-list"
   while IFS= read -r id; do printf 'Retention would remove %s (%s)\n' "$root/$id" "$(size "$root/$id")"; done < "$tmp/prune-list"
 }
 prune() {
   complete_ids > "$tmp/complete-list" || fail 'Cannot enumerate safe backups.'
-  sed -n '4,$p' "$tmp/complete-list" > "$tmp/prune-list"
+  sed -n '2,$p' "$tmp/complete-list" > "$tmp/prune-list"
   while IFS= read -r id; do
     valid_child "$id"
     printf 'Removing backup %s (%s)\n' "$root/$id" "$(size "$root/$id")"

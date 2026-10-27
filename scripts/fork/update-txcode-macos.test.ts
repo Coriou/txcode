@@ -15,24 +15,29 @@ const release = (tag: string, overrides = {}) => ({
   tag_name: tag,
   draft: false,
   prerelease: true,
-  assets: [{ name: archive, size: payload.length }, { name: "SHA256SUMS", size: 200 }],
+  assets: [
+    { name: archive, size: payload.length },
+    { name: "SHA256SUMS", size: 200 },
+  ],
   ...overrides,
 });
 
-async function fixture(options: {
-  arm?: boolean;
-  running?: boolean;
-  checksum?: string;
-  star?: boolean;
-  backups?: boolean;
-  escape?: boolean;
-  forbidden?: string;
-  pipe?: boolean;
-  aside?: "only" | "both";
-  installed?: boolean;
-  rollbackId?: string;
-  confirms?: number;
-} = {}) {
+async function fixture(
+  options: {
+    arm?: boolean;
+    running?: boolean;
+    checksum?: string;
+    star?: boolean;
+    backups?: boolean;
+    escape?: boolean;
+    forbidden?: string;
+    pipe?: boolean;
+    aside?: "only" | "both";
+    installed?: boolean;
+    rollbackId?: string;
+    confirms?: number;
+  } = {},
+) {
   const root = await FS.realpath(await FS.mkdtemp(Path.join(OS.tmpdir(), "txcode-updater-test-")));
   const apps = Path.join(root, "Applications");
   const backups = Path.join(root, "backups");
@@ -43,44 +48,59 @@ async function fixture(options: {
     const url = new URL(request.url ?? "/", "http://fixture");
     requests.push(url.pathname);
     if (url.pathname === "/repos/Coriou/txcode/releases") {
-      response.end(JSON.stringify([
-        release("v9.0.0", { prerelease: false }),
-        release("v0.1.3-nightly.20261028.100", { draft: true }),
-        release("v0.1.3-prc-media.20261029.200"),
-        release("v0.1.3-nightly.20261027.9"),
-        release(`v${version}`),
-        release("v0.1.3-nightly.20261026.999"),
-      ]));
+      response.end(
+        JSON.stringify([
+          release("v9.0.0", { prerelease: false }),
+          release("v0.1.3-nightly.20261028.100", { draft: true }),
+          release("v0.1.3-prc-media.20261029.200"),
+          release("v0.1.3-nightly.20261027.9"),
+          release(`v${version}`),
+          release("v0.1.3-nightly.20261026.999"),
+        ]),
+      );
     } else if (url.pathname.endsWith(`/${archive}`)) response.end(payload);
     else if (url.pathname.endsWith("/SHA256SUMS")) {
       const digest = options.checksum ?? hash;
       response.end(options.star ? `${digest} *${archive}\n` : `${digest}  ${archive}\n`);
+    } else {
+      response.statusCode = 404;
+      response.end();
     }
-    else { response.statusCode = 404; response.end(); }
   });
   try {
     await Promise.all([apps, backups, bin, downloadTmp].map((path) => FS.mkdir(path)));
     const bundle = Path.join(root, "bundle/Tx Code (Nightly).app");
     await FS.mkdir(Path.join(bundle, "Contents/MacOS"), { recursive: true });
     await FS.mkdir(Path.join(bundle, "Contents/Resources"));
-    await FS.writeFile(Path.join(bundle, "Contents/Info.plist"), JSON.stringify({
-      CFBundleIdentifier: "net.coriou.txcode",
-      CFBundleShortVersionString: version,
-      CFBundleExecutable: "Tx Code",
-    }));
+    await FS.writeFile(
+      Path.join(bundle, "Contents/Info.plist"),
+      JSON.stringify({
+        CFBundleIdentifier: "net.coriou.txcode",
+        CFBundleShortVersionString: version,
+        CFBundleExecutable: "Tx Code",
+      }),
+    );
     await FS.writeFile(Path.join(bundle, "Contents/MacOS/Tx Code"), "fixture");
-    await FS.writeFile(Path.join(bundle, "Contents/Resources/app.asar"), '{"t3codeCommitHash":"abcdef1234567890"}');
+    await FS.writeFile(
+      Path.join(bundle, "Contents/Resources/app.asar"),
+      '{"t3codeCommitHash":"abcdef1234567890"}',
+    );
     if (options.installed) await FS.cp(bundle, Path.join(apps, "Tx Code.app"), { recursive: true });
     if (options.aside) {
       await FS.mkdir(Path.join(apps, "Tx Code.app.aside"));
       if (options.aside === "both") await FS.mkdir(Path.join(apps, "Tx Code.app"));
     }
     const processes = Path.join(root, "processes");
-    await FS.writeFile(processes, options.running
-      ? `${apps}/Tx Code (Nightly).app/Contents/MacOS/Tx Code\n`
-      : `/worktree/Tx Code.app/script\n/Applications/T3 Code.app/Contents/MacOS/T3 Code\n`);
+    await FS.writeFile(
+      processes,
+      options.running
+        ? `${apps}/Tx Code (Nightly).app/Contents/MacOS/Tx Code\n`
+        : `/worktree/Tx Code.app/script\n/Applications/T3 Code.app/Contents/MacOS/T3 Code\n`,
+    );
     const shim = Path.join(bin, "shim.cjs");
-    await FS.writeFile(shim, `#!${process.execPath}
+    await FS.writeFile(
+      shim,
+      `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
 const name = path.basename(process.argv[1]);
@@ -102,15 +122,22 @@ else if (name === 'plutil') {
 } else if (name === 'ditto') fs.cpSync(args[0], args[1], { recursive: true });
 else if (name === 'file') console.log('Mach-O 64-bit executable x86_64');
 else if (name === 'open') process.exit(99);
-`, { mode: 0o755 });
+`,
+      { mode: 0o755 },
+    );
     for (const name of ["uname", "launchctl", "plutil", "hdiutil", "ditto", "file", "open"]) {
       await FS.symlink(shim, Path.join(bin, name));
     }
-    const manifest = [
-      "tag\tvfixture", "sha256\tnone", "bundle-id\tnet.coriou.txcode",
-      `version\t${version}`, "arch\tx86_64", "commit\tabcdef1",
-      ...(options.forbidden ? [`source\t${options.forbidden}`] : []),
-    ].join("\n") + "\n";
+    const manifest =
+      [
+        "tag\tvfixture",
+        "sha256\tnone",
+        "bundle-id\tnet.coriou.txcode",
+        `version\t${version}`,
+        "arch\tx86_64",
+        "commit\tabcdef1",
+        ...(options.forbidden ? [`source\t${options.forbidden}`] : []),
+      ].join("\n") + "\n";
     if (options.backups || options.escape || options.forbidden || options.rollbackId) {
       for (const id of ["20260101T000000Z", "20260102T000000Z", "20260103T000000Z"]) {
         await FS.mkdir(Path.join(backups, id));
@@ -126,28 +153,38 @@ else if (name === 'open') process.exit(99);
         await FS.symlink(outside, Path.join(backups, "20260105T000000Z"));
       }
       if (options.rollbackId) {
-        await FS.cp(bundle, Path.join(backups, options.rollbackId, "Tx Code.app"), { recursive: true });
-        await FS.writeFile(Path.join(backups, options.rollbackId, "BACKUP-MANIFEST.txt"), [
-          "tag\tvfixture",
-          "sha256\tnone",
-          "bundle-id\tnet.coriou.txcode",
-          `version\t${version}`,
-          "arch\tx86_64",
-          "commit\tabcdef1234567890",
-          `source\t${Path.join(apps, "Tx Code.app")}`,
-        ].join("\n") + "\n");
+        await FS.cp(bundle, Path.join(backups, options.rollbackId, "Tx Code.app"), {
+          recursive: true,
+        });
+        await FS.writeFile(
+          Path.join(backups, options.rollbackId, "BACKUP-MANIFEST.txt"),
+          [
+            "tag\tvfixture",
+            "sha256\tnone",
+            "bundle-id\tnet.coriou.txcode",
+            `version\t${version}`,
+            "arch\tx86_64",
+            "commit\tabcdef1234567890",
+            `source\t${Path.join(apps, "Tx Code.app")}`,
+          ].join("\n") + "\n",
+        );
       }
     }
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("No fixture listener");
     const origin = `http://127.0.0.1:${address.port}`;
-    const source = await FS.readFile(Path.join(import.meta.dirname, "update-txcode-macos.sh"), "utf8");
+    const source = await FS.readFile(
+      Path.join(import.meta.dirname, "update-txcode-macos.sh"),
+      "utf8",
+    );
     const script = Path.join(root, "update.sh");
     await FS.writeFile(script, source.replace(/https:\/\/(api\.)?github\.com/g, origin));
     const command = options.forbidden || options.rollbackId ? "rollback" : "update";
     const pty = Path.join(root, "terminal.py");
-    await FS.writeFile(pty, `import os, pty, select, sys
+    await FS.writeFile(
+      pty,
+      `import os, pty, select, sys
 cmd = sys.argv[1:]
 pid, fd = pty.fork()
 if pid == 0:
@@ -171,14 +208,26 @@ try:
 finally:
     _, status = os.waitpid(pid, 0)
     raise SystemExit(os.waitstatus_to_exitcode(status))
-`);
+`,
+    );
     const result = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
-      const child = ChildProcess.spawn(options.pipe ? "/bin/sh" : "python3", options.pipe ? [script] : [pty, "/bin/sh", script, command], {
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: downloadTmp, TXCODE_UPDATE_FIXTURE: "1",
-          TXCODE_UPDATE_FIXTURE_ROOT: root, TXCODE_UPDATE_APPS: apps,
-          TXCODE_UPDATE_BACKUPS: backups, TXCODE_UPDATE_PS: processes },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const child = ChildProcess.spawn(
+        options.pipe ? "/bin/sh" : "python3",
+        options.pipe ? [script] : [pty, "/bin/sh", script, command],
+        {
+          env: {
+            ...process.env,
+            PATH: `${bin}:${process.env.PATH}`,
+            TMPDIR: downloadTmp,
+            TXCODE_UPDATE_FIXTURE: "1",
+            TXCODE_UPDATE_FIXTURE_ROOT: root,
+            TXCODE_UPDATE_APPS: apps,
+            TXCODE_UPDATE_BACKUPS: backups,
+            TXCODE_UPDATE_PS: processes,
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
       let output = "";
       let answered = 0;
       let sentId = false;
@@ -190,7 +239,9 @@ finally:
           child.stdin.write(`${options.rollbackId}\n`);
         }
         const prompts = output.match(/\[y\/yes to continue\]:/g)?.length ?? 0;
-        while (answered < prompts) { child.stdin.write(answered++ < acceptCount ? "yes\n" : "no\n"); }
+        while (answered < prompts) {
+          child.stdin.write(answered++ < acceptCount ? "yes\n" : "no\n");
+        }
       };
       child.stdout.on("data", receive);
       child.stderr.on("data", receive);
@@ -199,11 +250,20 @@ finally:
     });
     const names = await FS.readdir(backups);
     const newest = [...names].sort().at(-1);
-    const previous = newest ? await FS.readdir(Path.join(backups, newest)).catch(() => [] as string[]) : [];
+    const previous = newest
+      ? await FS.readdir(Path.join(backups, newest)).catch(() => [] as string[])
+      : [];
     const leftovers = await FS.readdir(downloadTmp);
-    if (leftovers.length > 0) throw new Error(`download directory left behind: ${leftovers.join(", ")}`);
-    return { ...result, requests, calls: await FS.readFile(Path.join(root, "calls"), "utf8").catch(() => ""),
-      backups: names, apps: await FS.readdir(apps), previous };
+    if (leftovers.length > 0)
+      throw new Error(`download directory left behind: ${leftovers.join(", ")}`);
+    return {
+      ...result,
+      requests,
+      calls: await FS.readFile(Path.join(root, "calls"), "utf8").catch(() => ""),
+      backups: names,
+      apps: await FS.readdir(apps),
+      previous,
+    };
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -211,16 +271,20 @@ finally:
   }
 }
 
-it("chooses the newest qualifying nightly and keeps three complete backups", async () => {
+it("chooses the newest qualifying nightly and keeps one complete backup", async () => {
   const result = await fixture({ backups: true });
   expect(result.code, result.output).toBe(0);
-  expect(result.requests).toEqual(["/repos/Coriou/txcode/releases",
+  expect(result.requests).toEqual([
+    "/repos/Coriou/txcode/releases",
     `/Coriou/txcode/releases/download/v${version}/${archive}`,
-    `/Coriou/txcode/releases/download/v${version}/SHA256SUMS`]);
+    `/Coriou/txcode/releases/download/v${version}/SHA256SUMS`,
+  ]);
   expect(result.apps).toEqual(["Tx Code (Nightly).app"]);
   expect(result.backups).not.toContain("20260101T000000Z");
+  expect(result.backups).not.toContain("20260102T000000Z");
+  expect(result.backups).not.toContain("20260103T000000Z");
   expect(result.backups).toContain("20260104T000000Z");
-  expect(result.backups).toHaveLength(4);
+  expect(result.backups).toHaveLength(2);
   expect(result.calls).not.toContain("open ");
   expect(result.output.split(`Removed download ${archive}`)).toHaveLength(2);
 });
@@ -258,12 +322,15 @@ it("refuses symlink backups before pruning", async () => {
   expect(result.backups).toContain("20260101T000000Z");
   expect(result.apps).toHaveLength(0);
 });
-it.each(["/home/fixture/.t3", "/home/fixture/Library/Application Support/t3code-v2"])("rejects a manifest naming %s", async (forbidden) => {
-  const result = await fixture({ forbidden });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Invalid manifest or forbidden source path");
-  expect(result.calls).not.toContain("ditto");
-});
+it.each(["/home/fixture/.t3", "/home/fixture/Library/Application Support/t3code-v2"])(
+  "rejects a manifest naming %s",
+  async (forbidden) => {
+    const result = await fixture({ forbidden });
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain("Invalid manifest or forbidden source path");
+    expect(result.calls).not.toContain("ditto");
+  },
+);
 it("requires terminal stdin even in fixture mode", async () => {
   const result = await fixture({ pipe: true });
   expect(result.code).not.toBe(0);
@@ -299,7 +366,10 @@ it("restores a snapshot after quarantining the current install", async () => {
   const result = await fixture({ rollbackId: "20260103T000000Z" });
   expect(result.code, result.output).toBe(0);
   expect(result.apps).toEqual(["Tx Code.app"]);
-  expect(result.backups).toContain("20260103T000000Z");
   expect(result.backups).not.toContain("20260101T000000Z");
+  expect(result.backups).not.toContain("20260102T000000Z");
+  expect(result.backups).not.toContain("20260103T000000Z");
+  expect(result.backups).toContain("20260104T000000Z");
+  expect(result.backups).toHaveLength(2);
   expect(result.calls).not.toContain("open ");
 });
