@@ -8,8 +8,11 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+// Fork-local: menus space presets against the wake times other threads hold.
+import { selectSnoozeOccupancy } from "@t3tools/client-runtime/state/snooze-spacing";
 import {
   AuthOrchestrationOperateScope,
+  DEFAULT_SERVER_SETTINGS,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -31,6 +34,9 @@ import {
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentSupportsTitleRegeneration,
+  // Fork-local: spacing comes from the thread's environment and every shell.
+  readEnvironmentSnoozeSpacingMinutes,
+  readQuietThreadShells,
   readThreadShell,
   useProjects,
 } from "../state/entities";
@@ -129,7 +135,17 @@ export function useThreadActionMenu(input: {
         titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
-      const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+      // Fork-local: skip this thread's own wake time so it can move into a free slot.
+      const snoozePresets = resolveSnoozePresets(now, timestampFormat, {
+        occupied: selectSnoozeOccupancy(readQuietThreadShells(), {
+          now: now.toISOString(),
+          exclude: (candidate) =>
+            candidate.id === thread.id && candidate.environmentId === thread.environmentId,
+        }),
+        spacingMinutes:
+          readEnvironmentSnoozeSpacingMinutes(thread.environmentId) ??
+          DEFAULT_SERVER_SETTINGS.snoozeSpacingMinutes,
+      });
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         branch: thread.branch ?? null,

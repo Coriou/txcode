@@ -265,3 +265,11 @@ several selected threads together. Choose **Wake thread** to bring a thread back
 A snoozed thread keeps working and stays hidden until its wake time, even while
 its agent wakes itself for background work. It comes back early only when it needs
 an approval or answer from you, when a run fails, or when you send it a message.
+
+Presets spread out instead of waking a batch at once: if another snoozed thread
+already holds the wake time a preset would pick, the next snooze lands 5 minutes
+later, and so on up to an hour. The menu shows the time each preset will actually
+use, and a multiple selection staggers in order. Custom times, snoozes until a
+usage limit resets, and undo keep the exact time you chose. Change the spacing or
+turn it off with **Space snoozes by** in **Settings → General** on web and
+desktop, or **Settings → Thread behavior** on mobile.

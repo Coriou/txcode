@@ -37,6 +37,9 @@ const SETTINGS_SEARCH_TERMS = {
     "auto-settle",
     "settle",
     "snooze",
+    // Fork-local: settings search finds the spacing row with these terms.
+    "snooze spacing",
+    "stagger snoozes",
     "usage limits",
     "auto-resume",
     "plan mode",

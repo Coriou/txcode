@@ -28,6 +28,12 @@ import {
   effectiveSnoozed,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
+// Fork-local: batch snoozes reserve wake times other threads still hold.
+import {
+  allocateSnoozeSlots,
+  selectSnoozeOccupancy,
+  type SnoozeSpacing,
+} from "@t3tools/client-runtime/state/snooze-spacing";
 import {
   createInboxReturnTracker,
   isThreadWorking,
@@ -53,10 +59,13 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  // Fork-local: menu copy states the default spacing and the spread's time range.
+  DEFAULT_SERVER_SETTINGS,
   ProjectId,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import { formatShortTimestamp } from "../timestampFormat";
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 
 import { ChevronDownIcon, FolderIcon, ListFilterIcon, PlusIcon, SettingsIcon } from "lucide-react";
@@ -1218,6 +1227,43 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const threadByKeyRef = useRef(threadByKey);
   const settledThreadKeysRef = useRef(settledThreadKeys);
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
+  // Fork-local: every environment's quiet shells; snooze slots compare across them.
+  const quietThreadsRef = useRef(threads);
+
+  // Fork-local: reserve wake times other threads still hold so a batch wakes in sequence.
+  const snoozeSpacingFor = (
+    now: Date,
+    environmentId: EnvironmentId | null,
+    exclude?: (thread: EnvironmentThreadShell) => boolean,
+  ): SnoozeSpacing => {
+    const at = now.toISOString();
+    return {
+      occupied: selectSnoozeOccupancy(
+        quietThreadsRef.current,
+        exclude === undefined ? { now: at } : { now: at, exclude },
+      ),
+      spacingMinutes:
+        (environmentId === null
+          ? undefined
+          : serverConfigs.get(environmentId)?.settings.snoozeSpacingMinutes) ??
+        DEFAULT_SERVER_SETTINGS.snoozeSpacingMinutes,
+    };
+  };
+
+  // Fork-local: stable so memoized rows do not re-render; the scan runs when a menu opens.
+  const resolveRowSnoozePresets = useStableCallback((thread: EnvironmentThreadShell) => {
+    const now = new Date();
+    return resolveSnoozePresets(
+      now,
+      timestampFormat,
+      snoozeSpacingFor(
+        now,
+        thread.environmentId,
+        (candidate) =>
+          candidate.id === thread.id && candidate.environmentId === thread.environmentId,
+      ),
+    );
+  });
 
   const jumpLabelByKey = (() => {
     const mapping = new Map<string, string>();
@@ -1562,6 +1608,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     threadByKeyRef.current = threadByKey;
     settledThreadKeysRef.current = settledThreadKeys;
     snoozedThreadKeysRef.current = snoozedThreadKeys;
+    // Fork-local: slots compare wake times across every environment a row can see.
+    quietThreadsRef.current = threads;
     sectionByThreadKeyRef.current = sectionByThreadKey;
   });
   const startActionSweep = useStableCallback(
@@ -2073,7 +2121,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       const unpinMenuItem = buildBulkUnpinContextMenuItem({
         pinnedCount: pinnedSelectedThreads.length,
       });
-      const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+      // Fork-local: a multi-select snooze ignores the selection's own reservations.
+      const selectedThreadKeySet = new Set(selectedThreadKeys);
+      const snoozeSpacing = snoozeSpacingFor(
+        selectionNow,
+        selectedThreads[0]?.environmentId ?? primaryEnvironmentId,
+        (candidate) =>
+          selectedThreadKeySet.has(
+            scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id)),
+          ),
+      );
+      const snoozePresets = resolveSnoozePresets(selectionNow, timestampFormat, snoozeSpacing);
+      // The hour cap counts from the unshifted base, not the first free slot the menu shows.
+      const snoozeBasePresets = resolveSnoozePresets(selectionNow, timestampFormat);
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
@@ -2145,17 +2205,33 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       if (clicked.value === "settle" && actionTargets.length === 0) return;
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
       if (clicked.value?.startsWith("snooze:")) {
-        const preset =
-          clicked.value === "snooze:custom"
-            ? await requestCustomSnooze()
-            : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
+        // Fork-local: presets fan out across free slots; a custom time stays exact.
+        const custom = clicked.value === "snooze:custom";
+        const preset = custom
+          ? await requestCustomSnooze()
+          : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
         if (preset) {
+          // A custom time is one explicit choice for the whole selection; presets stagger.
+          const snoozeSlots = custom
+            ? selectedThreads.map(() => preset.snoozedUntil)
+            : allocateSnoozeSlots({
+                snoozedUntil:
+                  snoozeBasePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value)
+                    ?.snoozedUntil ?? preset.snoozedUntil,
+                count: selectedThreads.length,
+                occupied: snoozeSpacing.occupied,
+                spacingMinutes: snoozeSpacing.spacingMinutes,
+              });
           const coSnoozingKeys = new Set(threadKeys);
           clearSelection();
           const outcomes = await Promise.all(
-            selectedThreads.map(async (thread) => {
+            selectedThreads.map(async (thread, index) => {
               const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-              const outcome = await performSnooze(threadRef, preset, { coSnoozingKeys });
+              const outcome = await performSnooze(
+                threadRef,
+                { snoozedUntil: snoozeSlots[index] ?? preset.snoozedUntil },
+                { coSnoozingKeys },
+              );
               return { outcome, threadRef };
             }),
           );
@@ -2177,6 +2253,24 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     : "Failed to snooze threads",
                 description:
                   firstError instanceof Error ? firstError.message : "An error occurred.",
+              }),
+            );
+          }
+
+          const firstSlot = snoozeSlots[0];
+          const lastSlot = snoozeSlots.at(-1);
+          if (
+            failures.length === 0 &&
+            snoozedThreadRefs.length > 1 &&
+            firstSlot !== undefined &&
+            lastSlot !== undefined &&
+            firstSlot !== lastSlot
+          ) {
+            toastManager.add(
+              stackedThreadToast({
+                type: "success",
+                title: `${snoozedThreadRefs.length} threads snoozed`,
+                description: `${formatShortTimestamp(firstSlot, timestampFormat)}–${formatShortTimestamp(lastSlot, timestampFormat)}`,
               }),
             );
           }
@@ -2365,7 +2459,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         const isPinned = thread.pinnedAt != null;
-        const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
+        // Fork-local: rows spread theirs against the other threads' wake times.
+        const snoozePresets = resolveRowSnoozePresets(thread);
         const threadProjectGroup =
           projectGroupsRef.current.find((project) =>
             project.memberProjectRefs.some(
@@ -3038,6 +3133,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               EMPTY_PROVIDER_ENTRIES
                             }
                             timestampFormat={timestampFormat}
+                            resolveSnoozePresets={resolveRowSnoozePresets}
                             onThreadClick={handleThreadClick}
                             onThreadActivate={navigateToThread}
                             onStartRename={startThreadRename}

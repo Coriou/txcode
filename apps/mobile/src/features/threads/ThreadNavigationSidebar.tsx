@@ -2,6 +2,8 @@ import { useActiveNewTask } from "../../state/active-new-task";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
+// Fork-local: row menus stagger snooze presets by each environment's minutes.
+import { DEFAULT_SNOOZE_SPACING_MINUTES } from "@t3tools/contracts/settings";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import type {
   EnvironmentProject,
@@ -290,6 +292,8 @@ function ThreadNavigationSidebarPane(
     pinReorderEnvironmentIds,
     activeReorderEnvironmentIds,
     titleRegenerationEnvironmentIds,
+    // Fork-local: spacing is set per environment, so rows read their own.
+    snoozeSpacingMinutesByEnvironment,
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
   const pendingOrder = usePendingThreadOrder(nowMinute, snoozeWakeTick);
@@ -298,6 +302,8 @@ function ThreadNavigationSidebarPane(
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    // Fork-local: rows space their presets against other threads' wake times.
+    snoozeOccupancy,
   } = useThreadListV2({
     threads,
     pendingTasks,
@@ -564,6 +570,11 @@ function ThreadNavigationSidebarPane(
             pinned={item.item.pinned}
             wokeAt={item.item.wokeAt}
             snoozePresetMinute={item.snoozePresetMinute ?? ""}
+            snoozeOccupancy={snoozeOccupancy}
+            snoozeSpacingMinutes={
+              snoozeSpacingMinutesByEnvironment.get(thread.environmentId) ??
+              DEFAULT_SNOOZE_SPACING_MINUTES
+            }
             snoozeWakeLabelText={item.snoozeWakeLabelText}
             timeLabel={item.timeLabel}
             project={projectByKey.get(scopeKey) ?? null}

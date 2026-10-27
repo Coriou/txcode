@@ -14,6 +14,8 @@ const SHARED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleOnMerge",
   "autoResumeLimitedThreads",
   "snoozeLimitedThreads",
+  // Fork-local: keep the spacing rule identical on every environment a snooze can land in.
+  "snoozeSpacingMinutes",
   "newWorktreesStartFromOrigin",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",

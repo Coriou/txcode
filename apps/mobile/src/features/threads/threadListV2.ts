@@ -8,6 +8,11 @@ import {
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+// Fork-local: mobile menus space presets the same way the web sidebar does.
+import {
+  spaceSnoozePresets,
+  type SnoozeSpacing,
+} from "@t3tools/client-runtime/state/snooze-spacing";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { resolveThreadProviderStack } from "@t3tools/client-runtime/state/models";
 import {
@@ -72,17 +77,32 @@ export type ThreadListV2Status =
   | "ready";
 export type ThreadListV2SwipeAction = "archive" | "settle" | "unsettle" | "snooze" | "unsnooze";
 
+// Fork-local: spread presets across free wake slots when spacing is configured.
+export function resolveThreadListV2SnoozePresets(
+  now: Date,
+  spacing?: SnoozeSpacing,
+): ReadonlyArray<SnoozePreset> {
+  const presets = resolveSnoozePresets(now);
+  return spacing === undefined
+    ? presets
+    : spaceSnoozePresets(presets, {
+        occupied: spacing.occupied,
+        spacingMinutes: spacing.spacingMinutes,
+      });
+}
+
 export function resolveThreadListV2SnoozeMenuSelection(input: {
   readonly event: string;
   readonly displayedPresets: ReadonlyArray<SnoozePreset>;
   readonly now: Date;
+  readonly spacing?: SnoozeSpacing;
 }):
   | { readonly _tag: "selected"; readonly preset: SnoozePreset }
   | { readonly _tag: "expired" }
   | { readonly _tag: "not-snooze" } {
   if (!input.event.startsWith("snooze:")) return { _tag: "not-snooze" };
 
-  const currentPreset = resolveSnoozePresets(input.now).find(
+  const currentPreset = resolveThreadListV2SnoozePresets(input.now, input.spacing).find(
     (candidate) => input.event === `snooze:${candidate.id}`,
   );
   if (currentPreset) return { _tag: "selected", preset: currentPreset };

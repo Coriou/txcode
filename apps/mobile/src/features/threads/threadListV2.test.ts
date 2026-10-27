@@ -35,6 +35,7 @@ import {
   buildThreadListV2ListItems,
   getThreadListV2OrderedSection,
   resolveThreadListV2SnoozeMenuSelection,
+  resolveThreadListV2SnoozePresets,
   resolveThreadListV2Status,
   resolveThreadListV2WokeAt,
   sortThreadsForListV2,
@@ -71,6 +72,29 @@ describe("resolveThreadListV2SnoozeMenuSelection", () => {
     if (selection._tag === "selected") {
       expect(selection.preset.snoozedUntil).toBe(
         new Date(selectedAt.getTime() + 60 * 60 * 1_000).toISOString(),
+      );
+    }
+  });
+
+  it("dispatches the staggered slot the menu showed", () => {
+    const selectedAt = new Date(2026, 4, 8, 10, 30);
+    const spacing = {
+      occupied: new Map([[selectedAt.getTime() + 60 * 60 * 1_000, 1]]),
+      spacingMinutes: 5,
+    };
+    const displayedPresets = resolveThreadListV2SnoozePresets(selectedAt, spacing);
+    const selection = resolveThreadListV2SnoozeMenuSelection({
+      event: "snooze:hour",
+      displayedPresets,
+      now: selectedAt,
+      spacing,
+    });
+
+    expect(selection._tag).toBe("selected");
+    if (selection._tag === "selected") {
+      expect(selection.preset).toEqual(displayedPresets.find((preset) => preset.id === "hour"));
+      expect(selection.preset.snoozedUntil).toBe(
+        new Date(selectedAt.getTime() + 65 * 60 * 1_000).toISOString(),
       );
     }
   });

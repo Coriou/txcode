@@ -92,6 +92,17 @@ export const SidebarAutoSettleAfterDays = Schema.Number.check(
 );
 export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
 const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3;
+// Fork-local: minutes added between snoozes that would otherwise wake together; 0 disables it.
+export const MIN_SNOOZE_SPACING_MINUTES = 0;
+export const MAX_SNOOZE_SPACING_MINUTES = 60;
+export const SnoozeSpacingMinutes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_SNOOZE_SPACING_MINUTES,
+    maximum: MAX_SNOOZE_SPACING_MINUTES,
+  }),
+);
+export type SnoozeSpacingMinutes = typeof SnoozeSpacingMinutes.Type;
+export const DEFAULT_SNOOZE_SPACING_MINUTES: SnoozeSpacingMinutes = 5;
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
 export const GlassOpacity = Schema.Int.check(
@@ -1285,6 +1296,9 @@ export const ServerSettings = Schema.Struct({
   ),
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  snoozeSpacingMinutes: SnoozeSpacingMinutes.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SNOOZE_SPACING_MINUTES)),
+  ),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: guest links for this machine's threads. Off refuses new links and pauses existing ones. */
   guestSharingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1634,6 +1648,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  snoozeSpacingMinutes: Schema.optionalKey(SnoozeSpacingMinutes),
   guestSharingEnabled: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({

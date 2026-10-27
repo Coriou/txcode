@@ -274,6 +274,18 @@ export function readThreadShell(ref: ScopedThreadRef): EnvironmentThreadShell | 
   return appAtomRegistry.get(environmentThreadShells.threadShellAtom(ref));
 }
 
+// Fork-local: snooze spacing reads every environment's reservations once, when a menu opens.
+export function readQuietThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  return appAtomRegistry.get(environmentThreadShells.quietThreadShellsAtom);
+}
+
+export function readEnvironmentSnoozeSpacingMinutes(
+  environmentId: EnvironmentId,
+): number | undefined {
+  return appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.settings
+    .snoozeSpacingMinutes;
+}
+
 export function waitForThreadShell(ref: ScopedThreadRef, timeoutMs = 5_000): Promise<boolean> {
   return waitForAtomValue({
     registry: appAtomRegistry,

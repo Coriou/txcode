@@ -365,15 +365,15 @@ function SidebarThreadTooltip({
   );
 }
 
+// Fork-local: presets resolve per opening, against the slots other threads hold.
 function SnoozeMenuButton(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
-  timestampFormat: TimestampFormat;
+  resolvePresets: () => ReadonlyArray<SnoozePreset>;
 }) {
-  const { open, onOpenChange, onSnooze, timestampFormat } = props;
-  // oxlint-disable-next-line react/purity -- Presets are resolved only while the menu is open, so each opening reads a fresh time.
-  const presets = open ? resolveSnoozePresets(new Date(), timestampFormat) : [];
+  const { open, onOpenChange, onSnooze, resolvePresets } = props;
+  const presets = open ? resolvePresets() : [];
   return (
     <Menu open={open} onOpenChange={onOpenChange}>
       <Tooltip>
@@ -541,6 +541,10 @@ type SidebarThreadRowProps = {
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   timestampFormat: TimestampFormat;
+  /** Fork-local: spreads consecutive snoozes across slots; resolved when the menu opens. */
+  resolveSnoozePresets?:
+    | ((thread: SidebarThreadSummary) => ReadonlyArray<SnoozePreset>)
+    | undefined;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
   onStartRename: (threadRef: ScopedThreadRef, title: string) => void;
@@ -1436,7 +1440,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           open={snoozeMenuOpen}
                           onOpenChange={setSnoozeMenuOpen}
                           onSnooze={handleSnoozePreset}
-                          timestampFormat={props.timestampFormat}
+                          resolvePresets={() =>
+                            props.resolveSnoozePresets?.(thread) ??
+                            resolveSnoozePresets(new Date(), props.timestampFormat)
+                          }
                         />
                       ) : null}
                       {props.settlementSupported ? (
