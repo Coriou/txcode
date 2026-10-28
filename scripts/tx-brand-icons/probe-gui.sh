@@ -47,14 +47,14 @@ on run argv
       if ready then exit repeat
       delay 0.2
     end repeat
-    get name of every window
-    log result
-    get entire contents of window 1
-    log result
+    click radio button 2 of radio group 1 of group 1 of toolbar 1 of window 1
     click menu bar item "File" of menu bar 1
-    get name of every menu item of menu "File" of menu bar item "File" of menu bar 1
-    log result
     click last menu item of menu "File" of menu bar item "File" of menu bar 1
+    repeat 100 times
+      if (count windows) > 1 then exit repeat
+      delay 0.2
+    end repeat
+    delay 0.5
     get entire contents of window 1
     log result
   end tell
