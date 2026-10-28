@@ -33,7 +33,7 @@ async function fixture(
     forbidden?: string;
     pipe?: boolean;
     aside?: "only" | "both";
-    installed?: boolean;
+    installed?: boolean | "nightly";
     rollbackId?: string;
     confirms?: number;
   } = {},
@@ -69,7 +69,7 @@ async function fixture(
   });
   try {
     await Promise.all([apps, backups, bin, downloadTmp].map((path) => FS.mkdir(path)));
-    const bundle = Path.join(root, "bundle/Tx Code (Nightly).app");
+    const bundle = Path.join(root, "bundle/Tx Code.app");
     await FS.mkdir(Path.join(bundle, "Contents/MacOS"), { recursive: true });
     await FS.mkdir(Path.join(bundle, "Contents/Resources"));
     await FS.writeFile(
@@ -85,7 +85,13 @@ async function fixture(
       Path.join(bundle, "Contents/Resources/app.asar"),
       '{"t3codeCommitHash":"abcdef1234567890"}',
     );
-    if (options.installed) await FS.cp(bundle, Path.join(apps, "Tx Code.app"), { recursive: true });
+    if (options.installed) {
+      await FS.cp(
+        bundle,
+        Path.join(apps, options.installed === "nightly" ? "Tx Code (Nightly).app" : "Tx Code.app"),
+        { recursive: true },
+      );
+    }
     if (options.aside) {
       await FS.mkdir(Path.join(apps, "Tx Code.app.aside"));
       if (options.aside === "both") await FS.mkdir(Path.join(apps, "Tx Code.app"));
@@ -279,7 +285,7 @@ it("chooses the newest qualifying nightly and keeps one complete backup", async 
     `/Coriou/txcode/releases/download/v${version}/${archive}`,
     `/Coriou/txcode/releases/download/v${version}/SHA256SUMS`,
   ]);
-  expect(result.apps).toEqual(["Tx Code (Nightly).app"]);
+  expect(result.apps).toEqual(["Tx Code.app"]);
   expect(result.backups).not.toContain("20260101T000000Z");
   expect(result.backups).not.toContain("20260102T000000Z");
   expect(result.backups).not.toContain("20260103T000000Z");
@@ -344,7 +350,7 @@ it("accepts the star checksum form", async () => {
 it("stores the previous app in the backup and leaves no aside bundle", async () => {
   const result = await fixture({ installed: true });
   expect(result.code, result.output).toBe(0);
-  expect(result.apps).toEqual(["Tx Code (Nightly).app"]);
+  expect(result.apps).toEqual(["Tx Code.app"]);
   expect(result.previous).toContain("Tx Code.app");
   expect(result.previous).not.toContain("displaced");
 });
@@ -372,4 +378,11 @@ it("restores a snapshot after quarantining the current install", async () => {
   expect(result.backups).toContain("20260104T000000Z");
   expect(result.backups).toHaveLength(2);
   expect(result.calls).not.toContain("open ");
+});
+
+it("upgrades the legacy nightly bundle to Tx Code.app", async () => {
+  const result = await fixture({ installed: "nightly" });
+  expect(result.code, result.output).toBe(0);
+  expect(result.apps).toEqual(["Tx Code.app"]);
+  expect(result.previous).toContain("Tx Code (Nightly).app");
 });

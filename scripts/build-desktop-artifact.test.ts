@@ -41,6 +41,8 @@ import {
   resolveMacPasskeySigningConfiguration,
   resolveMergedStageDependencies,
   resolveBuildOptions,
+  resolveDesktopProductName,
+  resolveDesktopBuildIconAssets,
   stageWslRuntimeArchive,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
@@ -472,7 +474,6 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       }
     }),
   );
-
 
   it.effect("omits update feeds for pull request preview builds", () =>
     Effect.gen(function* () {
@@ -1698,3 +1699,12 @@ it.effect.skipIf(!symlinksSupported)("rebases packaged links into the isolated t
     );
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it("keeps the Tx Code product name with nightly channel icons", () => {
+  assert.equal(resolveDesktopProductName("0.1.4-nightly.20261028.3809"), "Tx Code");
+  assert.equal(resolveDesktopProductName("0.1.4"), "Tx Code");
+  assert.equal(
+    resolveDesktopBuildIconAssets("0.1.4-nightly.20261028.3809").macIconPng,
+    "assets/nightly/nightly-macos-1024.png",
+  );
+});
