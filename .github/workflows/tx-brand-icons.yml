@@ -1,0 +1,122 @@
+name: Tx brand icons
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fork/tx-brand-icons]
+    paths:
+      - .github/workflows/tx-brand-icons.yml
+      - scripts/tx-brand-icons/**
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    if: github.repository == 'Coriou/txcode'
+    runs-on: xcode-27
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2_Release_Candidate.app/Contents/Developer
+    steps:
+      # Vendored references contain orphaned gitlinks; omit them as in desktop preview CI.
+      - name: Checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git checkout --detach FETCH_HEAD
+      - name: Record pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tx-macos-icons"
+          xcodebuild -version > "$RUNNER_TEMP/tx-macos-icons/xcode.txt"
+          tool="$DEVELOPER_DIR/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          "$tool" --version > "$RUNNER_TEMP/tx-macos-icons/composer-version.json"
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["short-bundle-version"] == "27.2" and v["bundle-version"] == "143", v' "$RUNNER_TEMP/tx-macos-icons/composer-version.json"
+      - name: Export all native macOS variants
+        run: bash scripts/tx-brand-icons/export-macos.sh "$RUNNER_TEMP/tx-macos-icons"
+      - name: Upload native macOS exports
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-macos-icons-${{ github.sha }}
+          path: ${{ runner.temp }}/tx-macos-icons/
+          retention-days: 14
+      - name: Retain failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-macos-failure-${{ github.sha }}
+          path: ${{ runner.temp }}/tx-macos-icons/
+          retention-days: 14
+
+  export:
+    needs: macos
+    if: github.repository == 'Coriou/txcode'
+    runs-on: xcode-27
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      # Vendored references contain orphaned gitlinks; omit them as in desktop preview CI.
+      - name: Checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git checkout --detach FETCH_HEAD
+      - name: Inspect native exporter
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p icon-evidence
+          sw_vers | tee icon-evidence/macos.txt
+          xcodebuild -version | tee icon-evidence/xcode.txt
+          tool="$DEVELOPER_DIR/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          "$tool" --version | tee icon-evidence/composer-version.json
+          "$tool" --help > icon-evidence/composer-help.txt 2>&1
+          cat icon-evidence/composer-help.txt
+          echo "ICON_COMPOSER_TOOL=$tool" >> "$GITHUB_ENV"
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+      - name: Install exporter dependencies
+        run: vp install --frozen-lockfile --filter=@t3tools/scripts...
+      - name: Download native macOS exports
+        uses: actions/download-artifact@v4
+        with:
+          name: tx-macos-icons-${{ github.sha }}
+          path: ${{ runner.temp }}/tx-macos-icons
+      - name: Export and verify the complete icon set
+        run: |
+          vp run icons:export
+          vp run icons:check
+          vp run icons:export:android
+          cp "$RUNNER_TEMP/tx-macos-icons/dev/blueprint-macos-1024.png" assets/dev/
+          cp "$RUNNER_TEMP/tx-macos-icons/nightly/nightly-macos-1024.png" assets/nightly/
+          cp "$RUNNER_TEMP/tx-macos-icons/prod/black-macos-1024.png" assets/prod/
+          node scripts/tx-brand-icons/export-supplemental.ts
+          node scripts/tx-brand-icons/verify.ts icon-evidence/manifest.json
+          git diff --stat > icon-evidence/changed-assets.txt
+      - name: Upload verified outputs and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-brand-icons-${{ github.sha }}
+          path: |
+            icon-evidence/
+            assets/
+            apps/web/public/*icon*
+            apps/mobile/assets/android-*.png
+            apps/marketing/public/*icon*
+            apps/marketing/src/assets/icon*.webp
+          retention-days: 14
