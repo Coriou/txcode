@@ -746,15 +746,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   });
   // Fork-local: a thread that woke early holds no slot, so freeing one here would steal another's.
   const stillSnoozed = effectiveSnoozed(thread, { now: snoozeGateNow });
-  const snoozeSpacing = useMemo(
-    () => ({
-      occupied: stillSnoozed
-        ? withoutSnoozeOccupant(props.snoozeOccupancy, thread.snoozedUntil)
-        : props.snoozeOccupancy,
-      spacingMinutes: props.snoozeSpacingMinutes,
-    }),
-    [props.snoozeOccupancy, props.snoozeSpacingMinutes, stillSnoozed, thread.snoozedUntil],
-  );
+  const snoozeSpacing = {
+    occupied: stillSnoozed
+      ? withoutSnoozeOccupant(props.snoozeOccupancy, thread.snoozedUntil)
+      : props.snoozeOccupancy,
+    spacingMinutes: props.snoozeSpacingMinutes,
+  };
   // Fork-local: presets are spaced against the other threads' reservations.
   const snoozePresets = useMemo(() => {
     if (swipeActions.secondary !== "snooze") return [] as const;

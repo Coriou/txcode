@@ -26,6 +26,33 @@ export interface SnoozeOccupantShell extends ThreadSnoozeShell {
 
 const NO_OCCUPANTS: SnoozeOccupancy = new Map();
 
+/** One future wake time per reservation. Archived, expired, and early-woken threads are absent. */
+export function snoozeReservationKey<T extends SnoozeOccupantShell>(
+  shells: ReadonlyArray<T>,
+  options: { readonly now: string },
+): string {
+  const stamps: string[] = [];
+  for (const shell of shells) {
+    if (shell.archivedAt != null) continue;
+    if (!effectiveSnoozed(shell, options) || shell.snoozedUntil == null) continue;
+    stamps.push(shell.snoozedUntil);
+  }
+  stamps.sort();
+  return stamps.join("\n");
+}
+
+/** Occupancy for `snoozeReservationKey`. Duplicate stamps keep their counts. */
+export function snoozeOccupancyFromReservationKey(reservationKey: string): SnoozeOccupancy {
+  if (reservationKey.length === 0) return NO_OCCUPANTS;
+  const occupancy = new Map<number, number>();
+  for (const stamp of reservationKey.split("\n")) {
+    const wakeAtMs = Date.parse(stamp);
+    if (Number.isNaN(wakeAtMs)) continue;
+    occupancy.set(wakeAtMs, (occupancy.get(wakeAtMs) ?? 0) + 1);
+  }
+  return occupancy;
+}
+
 function formatSnoozeWhenLabel(preset: SnoozePreset, snoozedUntil: string): string {
   return snoozePresetWhenLabel(preset.id, new Date(snoozedUntil));
 }

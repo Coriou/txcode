@@ -5,6 +5,8 @@ import {
   allocateSnoozeSlot,
   allocateSnoozeSlots,
   selectSnoozeOccupancy,
+  snoozeOccupancyFromReservationKey,
+  snoozeReservationKey,
   spaceSnoozePresets,
   withoutSnoozeOccupant,
   type SnoozeOccupancy,
@@ -232,6 +234,21 @@ describe("selectSnoozeOccupancy", () => {
       now: NOW,
     });
     expect(counts.size).toBe(0);
+  });
+
+  it("rebuilds the same counts from the canonical reservation key", () => {
+    const shells = [
+      makeShell({ snoozedUntil: TOMORROW }),
+      makeShell({ snoozedUntil: TOMORROW }),
+      makeShell({ snoozedUntil: plusMinutes(TOMORROW, 5) }),
+      makeShell({ snoozedUntil: TOMORROW, archivedAt: "2026-04-10T09:00:00.000Z" }),
+      makeShell({ snoozedUntil: "not-a-date" }),
+      makeShell({ snoozedUntil: TOMORROW, pending: "approval" }),
+    ];
+    const key = snoozeReservationKey(shells, { now: NOW });
+    expect(snoozeOccupancyFromReservationKey(key)).toEqual(
+      selectSnoozeOccupancy(shells, { now: NOW }),
+    );
   });
 });
 

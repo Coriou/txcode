@@ -103,6 +103,29 @@ vi.mock("./components/SettingsSwitchRow", () => ({
   ),
 }));
 vi.mock("./components/SettingsRow", () => ({ SettingsRow: () => null }));
+vi.mock("../../components/ui/NumberField", () => ({
+  NumberField: ({
+    label,
+    value,
+    disabled,
+    onValueChange,
+    formatValue,
+  }: {
+    label: string;
+    value: number;
+    disabled?: boolean;
+    onValueChange: (value: number) => void;
+    formatValue?: (value: number) => string;
+  }) => (
+    <button
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onValueChange(value === 0 ? 5 : 0)}
+    >
+      {formatValue?.(value) ?? String(value)}
+    </button>
+  ),
+}));
 vi.mock("./components/BranchNamingSettings", () => ({
   BranchNamingSettings: (props: { onChange: (patch: ServerSettingsPatch) => void }) => {
     mocks.branchNaming.onChange = props.onChange;
@@ -125,6 +148,7 @@ vi.mock("./settings-environment-filter", () => ({
   }),
 }));
 
+import { SettingsThreadsRouteScreen } from "./SettingsThreadsRouteScreen";
 import { SettingsEnvironmentSourceControlRouteScreen } from "./SettingsServerControlsRouteScreen";
 
 function environment(environmentId: string, label: string) {
@@ -182,5 +206,22 @@ describe("SettingsServerControlsRouteScreen", () => {
         patch: { branchNamingMode: "custom", branchNameInstructions: "Use issue IDs." },
       },
     });
+  });
+
+  it("writes snooze spacing from the minutes field", () => {
+    act(() => root.render(<SettingsThreadsRouteScreen />));
+    const field = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Minutes between snoozes"]',
+    )!;
+    expect(field.textContent).toBe("5 min");
+    act(() => field.click());
+    expect(mocks.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: "local",
+        input: expect.objectContaining({
+          patch: expect.objectContaining({ snoozeSpacingMinutes: 0 }),
+        }),
+      }),
+    );
   });
 });
