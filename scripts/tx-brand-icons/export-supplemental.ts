@@ -1,10 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off - standalone fork asset generation.
 // Fork-only copies and silhouettes omitted by upstream's icon exporters.
-import { copyFile, readFile } from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import sharp from "sharp";
 
 const root = new URL("../../", import.meta.url);
-const source = await readFile(new URL("assets/prod/app-icon.icon/Assets/text.svg", root), "utf8");
+const source = await NodeFSP.readFile(
+  new URL("assets/prod/app-icon.icon/Assets/text.svg", root),
+  "utf8",
+);
 const paths = source.match(/<path[^>]*\/>/g)?.join("");
 if (!paths) throw new Error("Missing Tx wordmark paths");
 
@@ -32,7 +35,7 @@ for (const name of [
 ]) {
   const prefix = "assets/prod/t3-black-web-";
   const sourceName = name === "apple-touch-icon.png" ? "apple-touch-180.png" : name;
-  await copyFile(
+  await NodeFSP.copyFile(
     new URL(`${prefix}${sourceName}`, root),
     new URL(`apps/marketing/public/${name}`, root),
   );
