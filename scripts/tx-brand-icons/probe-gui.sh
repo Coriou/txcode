@@ -29,7 +29,26 @@ on run argv
     if exists static text "What’s New in Icon Composer" of scroll area 1 of group 1 of window 1 then
       click button 1 of scroll area 1 of group 1 of window 1
     end if
-    delay 1
+  end tell
+end run
+APPLESCRIPT
+open -a "$app" "$PWD/assets/prod/app-icon.icon"
+osascript - "$app" >> "$output/gui.txt" 2>&1 <<'APPLESCRIPT'
+on run argv
+  tell application (item 1 of argv) to activate
+  tell application "System Events" to tell process "Icon Composer"
+    repeat 150 times
+      set ready to false
+      try
+        repeat with candidate in windows
+          if name of candidate contains "app-icon" then set ready to true
+        end repeat
+      end try
+      if ready then exit repeat
+      delay 0.2
+    end repeat
+    get name of every window
+    log result
     get entire contents of window 1
     log result
     click menu bar item "File" of menu bar 1
