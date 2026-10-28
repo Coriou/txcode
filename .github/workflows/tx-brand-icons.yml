@@ -39,6 +39,24 @@ jobs:
           "$tool" --help > icon-evidence/composer-help.txt 2>&1
           cat icon-evidence/composer-help.txt
           echo "ICON_COMPOSER_TOOL=$tool" >> "$GITHUB_ENV"
+      - name: Probe native legacy macOS compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p icon-evidence/native-macos
+          xcrun actool --help > icon-evidence/actool-help.txt 2>&1
+          if xcrun actool assets/prod/app-icon.icon --compile icon-evidence/native-macos --platform macosx --minimum-deployment-target 12.0 --app-icon app-icon --output-partial-info-plist icon-evidence/native-macos/info.plist --output-format human-readable-text > icon-evidence/actool-probe.txt 2>&1; then
+            echo success > icon-evidence/actool-result.txt
+          else
+            echo unsupported > icon-evidence/actool-result.txt
+          fi
+          cat icon-evidence/actool-probe.txt
+      - name: Upload native probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-native-probe-${{ github.sha }}
+          path: icon-evidence/
+          retention-days: 14
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
@@ -52,6 +70,7 @@ jobs:
           vp run icons:export
           vp run icons:check
           vp run icons:export:android
+          node scripts/tx-brand-icons/export-supplemental.ts
           git diff --stat > icon-evidence/changed-assets.txt
       - name: Upload outputs and evidence
         if: always()
@@ -63,4 +82,6 @@ jobs:
             assets/
             apps/web/public/*icon*
             apps/mobile/assets/android-*.png
+            apps/marketing/public/*icon*
+            apps/marketing/src/assets/icon*.webp
           retention-days: 14
