@@ -45,8 +45,10 @@ jobs:
           set -euo pipefail
           mkdir -p icon-evidence/native-macos
           xcrun actool --help > icon-evidence/actool-help.txt 2>&1 || test -s icon-evidence/actool-help.txt
-          if xcrun actool assets/prod/app-icon.icon --compile icon-evidence/native-macos --platform macosx --minimum-deployment-target 12.0 --app-icon app-icon --output-partial-info-plist icon-evidence/native-macos/info.plist --output-format human-readable-text > icon-evidence/actool-probe.txt 2>&1; then
+          if xcrun actool assets/prod/app-icon.icon --compile icon-evidence/native-macos --platform macosx --minimum-deployment-target 12.0 --standalone-icon-behavior all --app-icon app-icon --output-partial-info-plist icon-evidence/native-macos/info.plist --output-format human-readable-text > icon-evidence/actool-probe.txt 2>&1; then
             echo success > icon-evidence/actool-result.txt
+            iconutil -c iconset icon-evidence/native-macos/app-icon.icns -o icon-evidence/native-macos/app-icon.iconset
+            ls -l icon-evidence/native-macos/app-icon.iconset
           else
             echo unsupported > icon-evidence/actool-result.txt
           fi

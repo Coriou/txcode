@@ -43,8 +43,8 @@ for (const name of [
 for (const [sourcePath, destination] of [
   ["assets/prod/black-ios-1024.png", "apps/marketing/src/assets/icon.webp"],
   ["assets/nightly/nightly-ios-1024.png", "apps/marketing/src/assets/icon-nightly.webp"],
-]) {
-  await sharp(new URL(sourcePath!, root).pathname)
+] as const) {
+  await sharp(new URL(sourcePath, root).pathname)
     .webp({ quality: 90, alphaQuality: 100 })
-    .toFile(new URL(destination!, root).pathname);
+    .toFile(new URL(destination, root).pathname);
 }
