@@ -26,7 +26,9 @@ on run argv
       end try
       delay 0.2
     end repeat
-    key code 36
+    if exists static text "What’s New in Icon Composer" of scroll area 1 of group 1 of window 1 then
+      click button 1 of scroll area 1 of group 1 of window 1
+    end if
     delay 1
     get entire contents of window 1
     log result
