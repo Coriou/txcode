@@ -17,7 +17,7 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 10
     env:
-      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2_Release_Candidate.app/Contents/Developer
     steps:
       # Vendored references contain orphaned gitlinks; omit them as in desktop preview CI.
       - name: Checkout
