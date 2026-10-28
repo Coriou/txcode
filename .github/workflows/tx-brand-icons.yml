@@ -1,0 +1,59 @@
+name: Tx brand icons
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fork/tx-brand-icons]
+    paths:
+      - .github/workflows/tx-brand-icons.yml
+      - scripts/tx-brand-icons/**
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.repository == 'Coriou/txcode'
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect native exporter
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p icon-evidence
+          sw_vers | tee icon-evidence/macos.txt
+          xcodebuild -version | tee icon-evidence/xcode.txt
+          tool="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          "$tool" --version | tee icon-evidence/composer-version.json
+          "$tool" --help > icon-evidence/composer-help.txt 2>&1
+          cat icon-evidence/composer-help.txt
+          echo "ICON_COMPOSER_TOOL=$tool" >> "$GITHUB_ENV"
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+      - name: Install exporter dependencies
+        run: vp install --frozen-lockfile --filter=@t3tools/scripts...
+      - name: Export existing automated variants
+        run: |
+          vp run icons:export
+          vp run icons:check
+          vp run icons:export:android
+          git diff --stat > icon-evidence/changed-assets.txt
+      - name: Upload outputs and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tx-brand-icons-${{ github.sha }}
+          path: |
+            icon-evidence/
+            assets/
+            apps/web/public/*icon*
+            apps/mobile/assets/android-*.png
+          retention-days: 14
