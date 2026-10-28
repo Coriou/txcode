@@ -60,12 +60,12 @@ on run argv
       log result
       click menu item "macOS pre-Tahoe" of menu 1 of pop up button "Platform"
       repeat 100 times
-        if value of pop up button "Platform" is "macOS pre-Tahoe" then exit repeat
+        set selectedPlatform to (value of pop up button "Platform") as text
+        if selectedPlatform contains "macOS pre-Tahoe" then exit repeat
         delay 0.2
       end repeat
-      get value of pop up button "Platform"
-      log result
-      if result is not "macOS pre-Tahoe" then error "Wrong platform selected"
+      log selectedPlatform
+      if selectedPlatform does not contain "macOS pre-Tahoe" then error "Wrong platform selected"
       get value of pop up button "Appearance"
       log result
     end tell
@@ -90,3 +90,5 @@ on run argv
   end tell
 end run
 APPLESCRIPT
+test -s "$output/black-macos-1024.png"
+sips -g pixelWidth -g pixelHeight "$output/black-macos-1024.png"
