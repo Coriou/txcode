@@ -2750,6 +2750,7 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
   return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`;
 }
 
+// Tx fork: all release channels display Tx Code; nightly branding stays in the icon assets.
 export function resolveDesktopProductName(_version: string): string {
   return desktopPackageJson.productName ?? "Tx Code";
 }
