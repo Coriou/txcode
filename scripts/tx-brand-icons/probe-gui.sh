@@ -47,7 +47,9 @@ on run argv
       if ready then exit repeat
       delay 0.2
     end repeat
-    click radio button 2 of radio group 1 of group 1 of toolbar 1 of window 1
+    if exists radio button 3 of radio group 1 of group 1 of toolbar 1 of window 1 then
+      click radio button 2 of radio group 1 of group 1 of toolbar 1 of window 1
+    end if
     click menu bar item "File" of menu bar 1
     click last menu item of menu "File" of menu bar item "File" of menu bar 1
     repeat 100 times
@@ -71,6 +73,7 @@ on run argv
     end tell
     get value of pop up button "Size" of group 2 of scroll area 1 of group 1 of sheet 1 of window 1
     log result
+    do shell script "/usr/sbin/screencapture -x " & quoted form of ((item 2 of argv) & "/selected-platform.png")
     click button 2 of group 1 of sheet 1 of window 1
     repeat 100 times
       if exists sheet 1 of sheet 1 of window 1 then exit repeat
@@ -84,8 +87,12 @@ on run argv
     delay 0.5
     click button "Export" of splitter group 1 of sheet 1 of sheet 1 of window 1
     repeat 150 times
-      if exists disk item ((item 2 of argv) & "/black-macos-1024.png") then exit repeat
-      delay 0.2
+      try
+        do shell script "/usr/bin/test -s " & quoted form of ((item 2 of argv) & "/black-macos-1024.png")
+        exit repeat
+      on error
+        delay 0.2
+      end try
     end repeat
   end tell
 end run
