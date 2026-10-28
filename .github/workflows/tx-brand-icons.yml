@@ -14,10 +14,10 @@ permissions:
 jobs:
   macos:
     if: github.repository == 'Coriou/txcode'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 10
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
     steps:
       # Vendored references contain orphaned gitlinks; omit them as in desktop preview CI.
       - name: Checkout
@@ -29,6 +29,17 @@ jobs:
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           git sparse-checkout set --no-cone '/*' '!/.repos/'
           git checkout --detach FETCH_HEAD
+      - name: Record available Icon Composer versions
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/tx-macos-icons"
+          for xcode in /Applications/Xcode*.app; do
+            tool="$xcode/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
+            if test -x "$tool"; then
+              echo "$xcode"
+              "$tool" --version
+            fi
+          done | tee "$RUNNER_TEMP/tx-macos-icons/toolchains.txt"
       - name: Inspect native Icon Composer GUI
         run: bash scripts/tx-brand-icons/probe-gui.sh "$RUNNER_TEMP/tx-macos-icons"
       - name: Upload native macOS exports
