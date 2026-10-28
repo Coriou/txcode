@@ -26,9 +26,16 @@ on run argv
       end try
       delay 0.2
     end repeat
-    log (entire contents of window 1)
+    key code 36
+    delay 1
+    get entire contents of window 1
+    log result
     click menu bar item "File" of menu bar 1
-    log (entire contents of menu "File" of menu bar item "File" of menu bar 1)
+    get name of every menu item of menu "File" of menu bar item "File" of menu bar 1
+    log result
+    click last menu item of menu "File" of menu bar item "File" of menu bar 1
+    get entire contents of window 1
+    log result
   end tell
 end run
 APPLESCRIPT
