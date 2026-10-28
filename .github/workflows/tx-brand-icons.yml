@@ -40,7 +40,7 @@ jobs:
           retention-days: 14
 
   export:
-    if: github.repository == 'Coriou/txcode'
+    if: github.repository == 'Coriou/txcode' && github.event_name == 'workflow_dispatch'
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
