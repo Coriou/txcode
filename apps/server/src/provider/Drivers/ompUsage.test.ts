@@ -3,7 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "@effect/vitest";
 import { OmpSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -36,6 +36,7 @@ const session = (id: string, extra: Record<string, unknown> = {}) =>
 const assistant = (overrides: {
   readonly id: string;
   readonly timestamp?: string;
+  readonly text?: string;
   readonly provider?: string;
   readonly model?: string;
   readonly usage?: Record<string, unknown>;
@@ -47,7 +48,7 @@ const assistant = (overrides: {
     timestamp: overrides.timestamp ?? "2026-10-24T13:59:10.287Z",
     message: {
       role: "assistant",
-      content: [{ type: "text", text: "hi" }],
+      content: [{ type: "text", text: overrides.text ?? "hi" }],
       provider: overrides.provider ?? "openrouter",
       model: overrides.model ?? "z-ai/glm-5.3-flash",
       usage: overrides.usage ?? {
@@ -378,12 +379,17 @@ describe("ompUsageReader transcripts", () => {
           },
         },
       });
+    const prefixBytes = Buffer.byteLength(
+      [session("parent"), assistant({ id: "a1", text: "" })].join("\n") + "\n",
+    );
+    // Split the normal model_usage entry across the reader's 256 KiB chunk boundary.
+    const text = "x".repeat(256 * 1024 - prefixBytes - 128);
     await NodeFSP.mkdir(NodePath.join(dir, "parent"));
     await NodeFSP.writeFile(
       NodePath.join(dir, "parent.jsonl"),
       [
         session("parent"),
-        assistant({ id: "a1" }),
+        assistant({ id: "a1", text }),
         modelUsage("probe-parent"),
         aggregate(false),
         aggregate(true),
@@ -422,7 +428,12 @@ describe("ompUsageReader transcripts", () => {
         )
       ).flat();
     const linewise = await read(64 * 1024 * 1024);
+    using projected = vi.spyOn(ompUsageFormat, "parseProjected");
     expect(await read(1)).toEqual(linewise);
+    expect(projected).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "model_usage", id: "probe-parent" }),
+      { sessionId: "parent" },
+    );
     expect(
       linewise
         .filter((record) => record.model === "anthropic/claude-haiku-4-5")
