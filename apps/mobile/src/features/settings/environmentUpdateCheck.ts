@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -7,6 +7,8 @@ import { findEnvironmentUpdate } from "./environment-maintenance";
 
 export interface EnvironmentReleaseCheck {
   readonly fromVersion: string;
+  readonly updatePolicy?: ExecutionEnvironmentDescriptor["updatePolicy"];
+  readonly desktopManaged: boolean;
   readonly targetVersion: string | null;
 }
 
@@ -20,20 +22,34 @@ const asError = (cause: unknown) =>
  * reports through a separate description request.
  */
 export const environmentReleaseCheckAtom = Atom.family((environmentId: EnvironmentId) =>
-  Atom.fn((readServerVersion: () => Promise<string>) =>
-    Effect.gen(function* () {
-      const fromVersion = yield* Effect.tryPromise({ try: readServerVersion, catch: asError });
-      const targetVersion = yield* Effect.tryPromise({
-        try: (signal) => findEnvironmentUpdate(fromVersion, signal),
-        catch: asError,
-      }).pipe(
-        Effect.timeoutOrElse({
-          duration: "20 seconds",
-          orElse: () => Effect.fail(new Error("Checking for updates timed out. Try again.")),
-        }),
-      );
-      return { fromVersion, targetVersion } satisfies EnvironmentReleaseCheck;
-    }),
+  Atom.fn(
+    (
+      readServerVersion: () => Promise<
+        Pick<ExecutionEnvironmentDescriptor, "serverVersion" | "updatePolicy"> &
+          Partial<Pick<ExecutionEnvironmentDescriptor, "capabilities">>
+      >,
+    ) =>
+      Effect.gen(function* () {
+        const descriptor = yield* Effect.tryPromise({ try: readServerVersion, catch: asError });
+        const fromVersion = descriptor.serverVersion;
+        const desktopManaged = descriptor.capabilities?.serverSelfUpdate === "desktop-managed";
+        const targetVersion = yield* Effect.tryPromise({
+          try: (signal) =>
+            findEnvironmentUpdate(fromVersion, signal, descriptor.updatePolicy, desktopManaged),
+          catch: asError,
+        }).pipe(
+          Effect.timeoutOrElse({
+            duration: "20 seconds",
+            orElse: () => Effect.fail(new Error("Checking for updates timed out. Try again.")),
+          }),
+        );
+        return {
+          fromVersion,
+          desktopManaged,
+          targetVersion,
+          updatePolicy: descriptor.updatePolicy,
+        } satisfies EnvironmentReleaseCheck;
+      }),
   ).pipe(Atom.withLabel(`mobile:environment-release-check:${environmentId}`)),
 );
 

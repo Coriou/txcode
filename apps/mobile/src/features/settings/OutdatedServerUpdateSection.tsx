@@ -1,9 +1,13 @@
+import {
+  destinationManualUpdateInfo,
+  supportsDestinationServerUpdate,
+} from "@t3tools/client-runtime/environment";
 import { useAtom, useAtomValue } from "@effect/atom-react";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
-import { View } from "react-native";
+import { Linking, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import * as Dialog from "../../components/ui/Dialog";
@@ -45,13 +49,19 @@ export function OutdatedServerUpdateSection({
     startCheck(async () => {
       const description = await describe(environmentId);
       if (AsyncResult.isFailure(description)) throw squashAtomCommandFailure(description);
-      return description.value.serverVersion;
+      return description.value;
     });
   }
 
   function requestUpdate() {
     const targetVersion = release?.targetVersion;
-    if (busy || !release || !targetVersion) return;
+    if (
+      busy ||
+      !release ||
+      !targetVersion ||
+      !supportsDestinationServerUpdate(release.updatePolicy, release.desktopManaged)
+    )
+      return;
     Dialog.alert(
       `Update ${label}?`,
       `Install Tx Code ${targetVersion}. Tx Code restarts on that machine and reconnects. Running threads may be interrupted.`,
@@ -85,11 +95,14 @@ export function OutdatedServerUpdateSection({
               : state.stage === "installing"
                 ? "Installing update…"
                 : "Downloading update…"
-            : release
-              ? release.targetVersion
-                ? `Version ${release.targetVersion} is available.`
-                : "No newer version is available yet."
-              : "This app needs a newer version of Tx Code on this machine."}
+            : release &&
+                !supportsDestinationServerUpdate(release.updatePolicy, release.desktopManaged)
+              ? destinationManualUpdateInfo(release.updatePolicy).message
+              : release
+                ? release.targetVersion
+                  ? `Version ${release.targetVersion} is available.`
+                  : "No newer version is available yet."
+                : "This app needs a newer version of Tx Code on this machine."}
         </Text>
         {error || state.status === "failed" ? (
           <Text selectable accessibilityRole="alert" className="text-sm text-danger-foreground">
@@ -104,7 +117,20 @@ export function OutdatedServerUpdateSection({
         loading={checking}
         onPress={check}
       />
-      {release?.targetVersion ? (
+      {release &&
+      !supportsDestinationServerUpdate(release.updatePolicy, release.desktopManaged) &&
+      destinationManualUpdateInfo(release.updatePolicy).url ? (
+        <SettingsActionRow
+          icon="arrow.up.right"
+          label="View releases"
+          onPress={() => {
+            const url = destinationManualUpdateInfo(release.updatePolicy).url;
+            if (url) void Linking.openURL(url);
+          }}
+        />
+      ) : null}
+      {release?.targetVersion &&
+      supportsDestinationServerUpdate(release.updatePolicy, release.desktopManaged) ? (
         <SettingsActionRow
           icon="arrow.up.circle"
           label={state.status === "failed" ? "Retry update" : `Update to ${release.targetVersion}`}

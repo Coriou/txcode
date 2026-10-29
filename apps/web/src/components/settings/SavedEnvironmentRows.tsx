@@ -363,6 +363,7 @@ export function SavedBackendListRow({
         <OutdatedServerUpdateAction
           environmentId={environmentId}
           serverLabel={`${environment.label} server`}
+          descriptor={lastDescriptor}
           fromVersion={lastDescriptor?.serverVersion}
           targetVersion={APP_VERSION}
           label={serverUpdateState.status === "failed" ? "Retry update" : "Update"}
@@ -372,6 +373,7 @@ export function SavedBackendListRow({
         <ServerUpdateAction
           environmentId={environmentId}
           serverLabel={`${environment.label} server`}
+          updatePolicy={environment.serverConfig?.environment.updatePolicy}
           selfUpdate={resolveServerSelfUpdateCapability(environment.serverConfig)}
           installation={environment.serverConfig?.environment.capabilities.serverInstallation}
           desktopAppUpdate={supportsDesktopAppUpdate(environment.serverConfig)}

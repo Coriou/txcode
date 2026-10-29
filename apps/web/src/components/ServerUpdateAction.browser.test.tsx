@@ -112,6 +112,7 @@ function renderAction(props: Partial<Parameters<typeof ServerUpdateAction>[0]> =
     <ServerUpdateAction
       environmentId={"env-test" as EnvironmentId}
       serverLabel="Test server"
+      updatePolicy={{ distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" }}
       selfUpdate="boot-service"
       targetVersion="0.0.31"
       {...props}
@@ -174,12 +175,14 @@ describe("ServerUpdatesAction", () => {
     {
       environmentId: "batch-a" as EnvironmentId,
       serverLabel: "Laptop",
+      updatePolicy: { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
       selfUpdate: "boot-service",
       targetVersion: "0.0.31",
     },
     {
       environmentId: "batch-b" as EnvironmentId,
       serverLabel: "Office",
+      updatePolicy: { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
       selfUpdate: "respawn",
       targetVersion: "0.0.31",
     },

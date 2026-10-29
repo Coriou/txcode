@@ -36,7 +36,14 @@ describe("environmentReleaseCheckAtom", () => {
     const atom = environmentReleaseCheckAtom(EnvironmentId.make("env-unmount"));
     const unmount = registry.mount(atom);
 
-    registry.set(atom, async () => "0.0.40");
+    registry.set(atom, async () => ({
+      serverVersion: "0.0.40",
+      updatePolicy: {
+        distribution: "t3",
+        serverUpdate: "supported",
+        desktopUpdate: "supported",
+      } as const,
+    }));
     const signal = await fetchStub.called;
     expect(signal.aborted).toBe(false);
 
@@ -53,7 +60,14 @@ describe("environmentReleaseCheckAtom", () => {
     const atom = environmentReleaseCheckAtom(EnvironmentId.make("env-timeout"));
     const unmount = registry.mount(atom);
 
-    registry.set(atom, async () => "0.0.40");
+    registry.set(atom, async () => ({
+      serverVersion: "0.0.40",
+      updatePolicy: {
+        distribution: "t3",
+        serverUpdate: "supported",
+        desktopUpdate: "supported",
+      } as const,
+    }));
     const signal = await fetchStub.called;
 
     await vi.advanceTimersByTimeAsync(20_000);

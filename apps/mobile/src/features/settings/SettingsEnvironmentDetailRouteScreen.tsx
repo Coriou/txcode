@@ -1,3 +1,4 @@
+import { destinationManualUpdateInfo } from "@t3tools/client-runtime/environment";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtom, useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
@@ -12,7 +13,7 @@ import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
-import { View } from "react-native";
+import { Linking, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -113,7 +114,12 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
 
   function requestServerUpdate() {
     const targetVersion = checkedRelease?.targetVersion;
-    if (disabled || !targetVersion || !capabilities || !supportsEnvironmentUpdate(capabilities))
+    if (
+      disabled ||
+      !targetVersion ||
+      !capabilities ||
+      !supportsEnvironmentUpdate(capabilities, config?.environment.updatePolicy)
+    )
       return;
     Dialog.alert(
       `Update ${environment?.environmentLabel ?? "environment"}?`,
@@ -237,6 +243,25 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                         {updateState.message}
                       </Text>
                     ) : null}
+                    {!supportsEnvironmentUpdate(
+                      config.environment.capabilities,
+                      config.environment.updatePolicy,
+                    ) ? (
+                      <Text
+                        className="text-sm text-foreground-muted"
+                        onPress={() => {
+                          const url = destinationManualUpdateInfo(
+                            config.environment.updatePolicy,
+                          ).url;
+                          if (url) void Linking.openURL(url);
+                        }}
+                      >
+                        {destinationManualUpdateInfo(config.environment.updatePolicy).message}
+                        {destinationManualUpdateInfo(config.environment.updatePolicy).url
+                          ? " View releases."
+                          : ""}
+                      </Text>
+                    ) : null}
                     {checkedRelease ? (
                       <Text className="text-sm text-foreground-muted">
                         {checkedRelease.targetVersion
@@ -245,7 +270,10 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                       </Text>
                     ) : null}
                     {checkedRelease?.targetVersion &&
-                    !supportsEnvironmentUpdate(config.environment.capabilities) ? (
+                    !supportsEnvironmentUpdate(
+                      config.environment.capabilities,
+                      config.environment.updatePolicy,
+                    ) ? (
                       <Text className="text-sm text-foreground-muted">
                         {capabilities?.serverSelfUpdate === "desktop-managed"
                           ? "Update the desktop app on this machine."
@@ -256,20 +284,35 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                   <SettingsActionRow
                     icon="arrow.clockwise"
                     label="Check for updates"
-                    disabled={disabled}
+                    disabled={
+                      disabled ||
+                      !supportsEnvironmentUpdate(
+                        config.environment.capabilities,
+                        config.environment.updatePolicy,
+                      )
+                    }
                     loading={pending === "check"}
                     onPress={() => {
-                      if (disabled) return;
-                      const fromVersion = config.environment.serverVersion;
+                      if (
+                        disabled ||
+                        !supportsEnvironmentUpdate(
+                          config.environment.capabilities,
+                          config.environment.updatePolicy,
+                        )
+                      )
+                        return;
                       void run("check", async () => {
-                        const exit = await checkRelease(async () => fromVersion);
+                        const exit = await checkRelease(async () => config.environment);
                         // `run` owns the error message, so a failed lookup rethrows to it.
                         if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
                       });
                     }}
                   />
                   {checkedRelease?.targetVersion &&
-                  supportsEnvironmentUpdate(config.environment.capabilities) ? (
+                  supportsEnvironmentUpdate(
+                    config.environment.capabilities,
+                    config.environment.updatePolicy,
+                  ) ? (
                     <SettingsActionRow
                       icon="arrow.up.circle"
                       label={`Update to ${checkedRelease.targetVersion}`}

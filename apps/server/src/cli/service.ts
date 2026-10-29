@@ -6,6 +6,7 @@ import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
 
+import { destinationUpdatePolicy } from "../forkUpdatePolicy.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
@@ -36,6 +37,9 @@ const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?:
   readonly allowDowngrade?: boolean;
   readonly start?: boolean;
 }) {
+  if (destinationUpdatePolicy.serverUpdate === "manual") {
+    return yield* new BootService.BootServiceManualUpdateError({});
+  }
   const service = yield* BootService.BootService;
   const status = yield* service.status;
   if (status.installed && status.current) {
@@ -292,6 +296,7 @@ export const recoverServiceOnboardingOffer = <R>(
         ),
       BootServiceCommandError: reportServiceSetupFailure,
       BootServiceInstallError: reportServiceSetupFailure,
+      BootServiceManualUpdateError: reportServiceSetupFailure,
       BootServicePrerequisiteError: reportServiceSetupFailure,
       BootServiceUpdatePendingError: reportServiceSetupFailure,
       BootServiceDowngradeRefusedError: reportServiceSetupFailure,

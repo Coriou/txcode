@@ -22,6 +22,7 @@ import { HttpClient } from "effect/http";
 
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
+import { destinationUpdatePolicy, MANUAL_UPDATE_REASON } from "../forkUpdatePolicy.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
@@ -44,6 +45,7 @@ export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
   readonly launcherManaged: boolean;
 }): ServerSelfUpdateCapability | null {
+  if (destinationUpdatePolicy.serverUpdate === "manual") return null;
   if (input.desktopManaged) return "desktop-managed" as const;
   return input.launcherManaged ? ("boot-service" as const) : null;
 }
@@ -122,6 +124,9 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
   )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
+    if (destinationUpdatePolicy.serverUpdate === "manual") {
+      return yield* failWith(MANUAL_UPDATE_REASON);
+    }
     if (capability === "desktop-managed") {
       if (desktopAppUpdate.available) {
         return yield* desktopAppUpdate.run(reportProgress);
@@ -261,6 +266,9 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     update,
     commitDesktopUpdate: Effect.fn("ServerSelfUpdate.commitDesktopUpdate")(
       function (requestId, onHandoffAccepted) {
+        if (destinationUpdatePolicy.desktopUpdate === "manual") {
+          return Effect.fail(failWith(MANUAL_UPDATE_REASON));
+        }
         return desktopAppUpdate.commit(requestId, onHandoffAccepted);
       },
     ),

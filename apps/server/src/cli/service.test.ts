@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Terminal from "effect/Terminal";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
-import { afterEach, vi } from "vite-plus/test";
+import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
@@ -18,6 +18,19 @@ import {
   recoverServiceOnboardingOffer,
   serviceCommand,
 } from "./service.ts";
+
+const policy = vi.hoisted(() => ({
+  distribution: "txcode",
+  serverUpdate: "supported",
+  desktopUpdate: "supported",
+}));
+vi.mock("../forkUpdatePolicy.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../forkUpdatePolicy.ts")>()),
+  destinationUpdatePolicy: policy,
+}));
+beforeEach(() => {
+  policy.serverUpdate = "supported";
+});
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -60,6 +73,31 @@ function makeTestService(
 }
 
 it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands", (it) => {
+  it.effect.each(["install", "update"] as const)(
+    "%s refuses fork reconciliation before the already-current shortcut",
+    (command) =>
+      Effect.gen(function* () {
+        policy.serverUpdate = "manual";
+        const fs = yield* FileSystem.FileSystem;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "tx-service-policy-" });
+        const { service, installOptions } = makeTestService(status);
+        vi.spyOn(BootService, "layer").mockReturnValue(
+          Layer.succeed(BootService.BootService, service),
+        );
+        const error = yield* Command.runWith(serviceCommand, { version: packageJson.version })([
+          command,
+          "--base-dir",
+          baseDir,
+        ]).pipe(
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
+          Effect.flip,
+        );
+        expect(error.message).toContain("installed manually");
+        expect(installOptions).toEqual([]);
+      }),
+  );
+
   it.effect.each(["install", "update"] as const)(
     "%s refuses a downgrade before changing the service",
     (command) =>
@@ -154,9 +192,12 @@ it.effect("leaves a newer service unchanged during onboarding without prompting"
 // regression: #9602 diagnose incomplete headless server setup
 it.effect("keeps the manual-server fallback when background prerequisites fail", () =>
   Effect.gen(function* () {
-    const ready = yield* recoverServiceOnboardingOffer(
-      Effect.fail(new BootService.BootServicePrerequisiteError({ problem: "linger-disabled" })),
-    );
-    expect(ready).toBe("skipped");
+    for (const error of [
+      new BootService.BootServicePrerequisiteError({ problem: "linger-disabled" }),
+      new BootService.BootServiceManualUpdateError({}),
+    ]) {
+      const ready = yield* recoverServiceOnboardingOffer(Effect.fail(error));
+      expect(ready).toBe("skipped");
+    }
   }),
 );

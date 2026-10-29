@@ -1,3 +1,6 @@
+import * as BootService from "../cloud/bootService.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import packageJson from "../../package.json" with { type: "json" };
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -8,7 +11,7 @@ import * as Path from "effect/Path";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { afterEach, vi } from "vite-plus/test";
 
-import { repointLauncher, resolveLauncherPath, resolveNewestVersion } from "./update.ts";
+import { runUpdate, repointLauncher, resolveLauncherPath, resolveNewestVersion } from "./update.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -126,5 +129,41 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       assert.equal(relative, launcher);
       assert.equal(absent, undefined);
     }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
+  );
+});
+
+it.layer(NodeServices.layer)("fork CLI update", (it) => {
+  it.effect.each([undefined, "1.2.3", packageJson.version])(
+    "refuses explicit, discovered and already-current updates before side effects (%s)",
+    (requestedVersion) =>
+      Effect.gen(function* () {
+        const error = yield* runUpdate({
+          baseDir: "/unused",
+          logsDir: "/unused/logs",
+          serverRuntimeStatePath: "/unused/state",
+          channel: undefined,
+          requestedVersion,
+          allowDowngrade: true,
+          assumeYes: true,
+        }).pipe(
+          Effect.provideService(BootService.BootService, {
+            status: Effect.die("unexpected service inspection"),
+            install: () => Effect.die("unexpected install"),
+            restart: Effect.die("unexpected restart"),
+            withStopped: () => Effect.die("unexpected stop"),
+            uninstall: Effect.die("unexpected uninstall"),
+          }),
+          Effect.provideService(ProcessRunner.ProcessRunner, {
+            run: () => Effect.die("unexpected runtime execution"),
+          }),
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.die("unexpected discovery or download")),
+          ),
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.flip,
+        );
+        assert.include(error.message, "installed manually");
+      }),
   );
 });

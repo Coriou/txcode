@@ -14,6 +14,20 @@ const descriptor = {
 } as const;
 
 describe("ExecutionEnvironmentDescriptor", () => {
+  it("decodes destination update policy and ignores future policy values", () => {
+    expect(decodeDescriptor(descriptor).updatePolicy).toBeUndefined();
+    const updatePolicy = {
+      distribution: "txcode",
+      serverUpdate: "manual",
+      desktopUpdate: "manual",
+    };
+    expect(decodeDescriptor({ ...descriptor, updatePolicy }).updatePolicy).toEqual(updatePolicy);
+    expect(
+      decodeDescriptor({ ...descriptor, updatePolicy: { ...updatePolicy, distribution: "future" } })
+        .updatePolicy,
+    ).toBeUndefined();
+  });
+
   it("decodes old, recognized and future manual installation descriptors", () => {
     expect(decodeDescriptor(descriptor).capabilities.serverInstallation).toBeUndefined();
     for (const installation of [{ kind: "npx" }, { kind: "npm-global", prefix: "/opt/node" }]) {

@@ -1,3 +1,4 @@
+import { supportsDestinationServerUpdate } from "@t3tools/client-runtime/environment";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import { cliReleaseChannelOf } from "@t3tools/shared/cliRelease";
@@ -69,6 +70,14 @@ export function collectServerUpdateTargets(
     const config = machine.serverConfig;
     if (machine.hostedByThisApp) continue;
     if (
+      config &&
+      !supportsDestinationServerUpdate(
+        config.environment.updatePolicy,
+        config.environment.capabilities.serverSelfUpdate === "desktop-managed",
+      )
+    )
+      continue;
+    if (
       config !== null &&
       resolveVersionMismatch(config.environment.serverVersion, targetVersion) === null
     ) {
@@ -111,6 +120,7 @@ export function collectServerUpdateTargets(
       serverLabel: machine.label,
       selfUpdate,
       installation: config.environment.capabilities.serverInstallation,
+      updatePolicy: config.environment.updatePolicy,
       desktopAppUpdate,
       targetVersion,
     });
@@ -386,6 +396,7 @@ function joinList(parts: ReadonlyArray<string>): string {
 
 /** One row per machine: this app's machines first, then servers, provider-only, and skipped. */
 export function describeUpdateEverything(plan: UpdateEverythingPlan): {
+  readonly hasUpdates: boolean;
   readonly summary: string;
   readonly version: string | null;
   readonly providerCount: number;
@@ -437,6 +448,7 @@ export function describeUpdateEverything(plan: UpdateEverythingPlan): {
   }
 
   return {
+    hasUpdates: plan.servers.length > 0 || providerCount > 0,
     summary,
     version:
       plan.localVersion ??

@@ -1,3 +1,4 @@
+import { beforeEach, vi } from "vite-plus/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import type { DesktopUpdateState, DesktopUpdateStatusReport } from "@t3tools/contracts";
@@ -12,6 +13,20 @@ import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import * as DesktopTelemetryReceiver from "../resourceTelemetry/DesktopTelemetryReceiver.ts";
 import * as DesktopAppUpdate from "./DesktopAppUpdate.ts";
+
+const policy = vi.hoisted(() => ({
+  distribution: "txcode",
+  serverUpdate: "supported",
+  desktopUpdate: "supported",
+}));
+vi.mock("../forkUpdatePolicy.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../forkUpdatePolicy.ts")>()),
+  destinationUpdatePolicy: policy,
+}));
+beforeEach(() => {
+  policy.serverUpdate = "supported";
+  policy.desktopUpdate = "supported";
+});
 
 function makeState(overrides: Partial<DesktopUpdateState> = {}): DesktopUpdateState {
   return {
@@ -105,6 +120,22 @@ const makeHarness = Effect.fn("test.make_desktop_app_update_harness")(function* 
 });
 
 it.layer(NodeServices.layer)("desktop app update", (it) => {
+  it.effect("refuses fork preparation and commit even with a desktop control fd", () =>
+    Effect.gen(function* () {
+      policy.desktopUpdate = "manual";
+      const { service } = yield* makeHarness();
+      expect(service.available).toBe(false);
+      expect(
+        (yield* service.run(() => Effect.die("unexpected progress")).pipe(Effect.flip)).reason,
+      ).toContain("installed manually");
+      expect(
+        (yield* service
+          .commit("old-token", () => Effect.die("unexpected handoff"))
+          .pipe(Effect.flip)).reason,
+      ).toContain("installed manually");
+    }),
+  );
+
   it.effect("collapses state reports into progress stages and succeeds on installing", () =>
     Effect.gen(function* () {
       const { service } = yield* makeHarness({

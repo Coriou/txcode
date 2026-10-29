@@ -24,6 +24,7 @@ function machine(
         label: id,
         platform: { os: "linux", arch: "x64" },
         serverVersion,
+        updatePolicy: { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
         capabilities: {
           repositoryIdentity: true,
           ...(selfUpdate ? { serverSelfUpdate: selfUpdate } : {}),
@@ -41,6 +42,63 @@ function machine(
 }
 
 describe("collectServerUpdateTargets", () => {
+  it("omits manual and unknown server offers while keeping provider-only plans", () => {
+    const withPolicy = (
+      id: string,
+      updatePolicy: NonNullable<
+        UpdateEverythingMachine["serverConfig"]
+      >["environment"]["updatePolicy"],
+    ) => {
+      const base = machine(id, "0.0.40", "boot-service");
+      return {
+        ...base,
+        serverConfig: {
+          ...base.serverConfig!,
+          environment: { ...base.serverConfig!.environment, updatePolicy },
+        },
+      };
+    };
+    const fork = withPolicy("fork", {
+      distribution: "txcode",
+      serverUpdate: "manual",
+      desktopUpdate: "manual",
+    });
+    const unknown = withPolicy("unknown", undefined);
+    const { targets, skipped } = collectServerUpdateTargets([fork, unknown], "0.0.50");
+    expect(targets).toEqual([]);
+    expect(skipped).toEqual([]);
+    const view = describeUpdateEverything({
+      localVersion: null,
+      localMachines: [],
+      servers: targets,
+      skipped,
+      providerMachines: [
+        { environmentId: fork.environmentId, label: "fork", providers: ["Codex"] },
+      ],
+    });
+    expect(view).toEqual({
+      hasUpdates: true,
+      summary: "Update 1 provider",
+      version: null,
+      providerCount: 1,
+      rows: [
+        {
+          environmentId: fork.environmentId,
+          label: "fork",
+          app: null,
+          skipped: null,
+          providers: ["Codex"],
+        },
+      ],
+    });
+    expect(
+      collectServerUpdateTargets(
+        [machine("upstream", "0.0.40", "boot-service"), fork, unknown],
+        "0.0.50",
+      ).targets.map((target) => target.serverLabel),
+    ).toEqual(["upstream"]);
+  });
+
   it("updates remote servers that can move to the target and names every skipped one", () => {
     const { targets, skipped } = collectServerUpdateTargets(
       [
