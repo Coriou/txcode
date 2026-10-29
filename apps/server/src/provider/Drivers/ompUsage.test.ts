@@ -12,7 +12,12 @@ import * as Schema from "effect/Schema";
 
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
-import { readTranscriptRecords } from "../../usage/usageTranscriptReader.ts";
+import {
+  decodeScanCache,
+  makeScanCacheWriter,
+  dedupeWithinFile,
+} from "../../usage/usageScanCache.ts";
+import { listTranscriptFiles, readTranscriptRecords } from "../../usage/usageTranscriptReader.ts";
 import { ompUsageDirectories, ompUsageFormat } from "./ompUsage.ts";
 
 type ScanState = { sessionId: string };
@@ -63,6 +68,28 @@ const assistant = (overrides: {
     },
   });
 
+const modelUsage = (id: string) =>
+  JSON.stringify({
+    type: "model_usage",
+    id,
+    parentId: "a1",
+    activeLeafId: "a2",
+    timestamp: "2026-10-24T14:00:00.000Z",
+    purpose: "task-completion-probe",
+    api: "anthropic-messages",
+    provider: "anthropic",
+    model: "claude-haiku-4-5",
+    usage: {
+      input: 10,
+      output: 2,
+      cacheRead: 30,
+      cacheWrite: 4,
+      reasoningTokens: 1,
+      cost: { total: 0.02 },
+    },
+    stopReason: "stop",
+  });
+
 function scan(lines: readonly string[], state: ScanState = initial()) {
   const records = lines.flatMap((line) => ompUsageFormat.parseLine(line, state));
   return { records, state };
@@ -109,6 +136,23 @@ describe("ompUsageFormat", () => {
       }),
     ]);
 
+    const standalone = JSON.parse(modelUsage("standalone"));
+    const { records: extra } = scan([
+      session("s1"),
+      JSON.stringify({ ...standalone, usage: { input: 10, cost: { total: 0 } } }),
+      JSON.stringify({ ...standalone, usage: { cost: { total: 0.02 } } }),
+      JSON.stringify({ ...standalone, timestamp: "invalid" }),
+      JSON.stringify({ ...standalone, provider: "" }),
+      JSON.stringify({ ...standalone, usage: { cost: { total: -1 } } }),
+    ]);
+    expect(extra.map((record) => record.reportedCostUsd)).toEqual([null, 0.02]);
+    expect(extra[1]?.totals).toEqual({
+      uncachedInputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+    });
     expect(records.map((record) => record.reportedCostUsd)).toEqual([null, null]);
     expect(records.map((record) => record.totals.outputTokens)).toEqual([2, 2]);
   });
@@ -315,6 +359,140 @@ describe("ompUsageReader transcripts", () => {
       rateModel: "z-ai/glm-5.3-flash",
       reportedCostUsd: 0.25,
     });
+  });
+
+  it("reads standalone calls, child sidecars and fork copies without task aggregate duplication", async () => {
+    const aggregate = (async: boolean) =>
+      JSON.stringify({
+        type: "message",
+        id: async ? "async-result" : "sync-result",
+        timestamp: "2026-10-24T14:02:00.000Z",
+        message: {
+          role: "toolResult",
+          toolName: "task",
+          content: [],
+          details: {
+            usage: { input: 10, output: 2, cost: { total: 0.02 } },
+            results: [{ agentId: "child", usage: { cost: { total: 0.02 } } }],
+            ...(async ? { async: { state: "completed", jobId: "child", type: "task" } } : {}),
+          },
+        },
+      });
+    await NodeFSP.mkdir(NodePath.join(dir, "parent"));
+    await NodeFSP.writeFile(
+      NodePath.join(dir, "parent.jsonl"),
+      [
+        session("parent"),
+        assistant({ id: "a1" }),
+        modelUsage("probe-parent"),
+        aggregate(false),
+        aggregate(true),
+        JSON.stringify({
+          type: "custom_message",
+          id: "delivery",
+          timestamp: "2026-10-24T14:03:00.000Z",
+          customType: "async-result",
+          content: "Task completed",
+          display: true,
+          details: {
+            jobs: [{ jobId: "child", type: "task", status: "completed", meta: { cost: 0.02 } }],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    await NodeFSP.writeFile(
+      NodePath.join(dir, "parent", "child.jsonl"),
+      [session("child", { parentSession: "parent.jsonl" }), modelUsage("probe-child")].join("\n") +
+        "\n",
+    );
+    await NodeFSP.writeFile(
+      NodePath.join(dir, "fork.jsonl"),
+      [session("fork"), assistant({ id: "a1" }), modelUsage("probe-parent")].join("\n") + "\n",
+    );
+    const files = await listTranscriptFiles(dir, 0);
+    const read = async (streamingThresholdBytes: number) =>
+      (
+        await Promise.all(
+          files.files.map(
+            async (file) =>
+              (await readTranscriptRecords(file.path, ompUsageFormat, undefined, {
+                streamingThresholdBytes,
+              }))!.records,
+          ),
+        )
+      ).flat();
+    const linewise = await read(64 * 1024 * 1024);
+    expect(await read(1)).toEqual(linewise);
+    expect(
+      linewise
+        .filter((record) => record.model === "anthropic/claude-haiku-4-5")
+        .map((record) => record.sessionId)
+        .sort(),
+    ).toEqual(["child", "fork", "parent"]);
+    const unique = dedupeWithinFile(linewise);
+    expect(unique).toHaveLength(3);
+    expect(unique.filter((record) => record.model === "anthropic/claude-haiku-4-5")).toEqual([
+      expect.objectContaining({
+        timestampMs: Date.parse("2026-10-24T14:00:00.000Z"),
+        rateModel: "claude-haiku-4-5",
+        reportedCostUsd: 0.02,
+        totals: {
+          uncachedInputTokens: 10,
+          outputTokens: 2,
+          cachedInputTokens: 30,
+          cacheCreationTokens: 4,
+          reasoningTokens: 1,
+        },
+      }),
+      expect.objectContaining({ reportedCostUsd: 0.02 }),
+    ]);
+    expect(unique.reduce((sum, record) => sum + (record.reportedCostUsd ?? 0), 0)).toBeCloseTo(
+      0.041,
+    );
+  });
+
+  it("invalidates old OMP positions and reparses unchanged history while retaining deleted-file records", async () => {
+    const path = NodePath.join(dir, "cached.jsonl");
+    await NodeFSP.writeFile(
+      path,
+      [session("parent"), assistant({ id: "a1" }), modelUsage("probe")].join("\n") + "\n",
+    );
+    const parsed = (await readTranscriptRecords(path, ompUsageFormat))!;
+    const stat = await NodeFSP.stat(path);
+    const old = {
+      provider: "omp" as const,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      records: scan([session("parent"), assistant({ id: "a1" })]).records,
+      tailRecords: [],
+      malformedRecords: 0,
+      position: parsed.position,
+    };
+    const document = JSON.parse(
+      makeScanCacheWriter()(
+        new Map([
+          [path, old],
+          ["/deleted.jsonl", old],
+        ]),
+        {},
+      ),
+    );
+    document.version = 9;
+    const restored = decodeScanCache(document, new Map([["omp", ompUsageFormat]]));
+    const cached = restored.get(path)!;
+    expect(cached.size).toBe(-1);
+    expect(restored.get("/deleted.jsonl")?.records).toEqual(old.records);
+    expect(cached.position.resumeOffset).toBe(0);
+    const rescanned = (await readTranscriptRecords(path, ompUsageFormat, cached.position))!;
+    expect(rescanned.resumed).toBe(false);
+    expect(rescanned.records).toHaveLength(2);
+    const current = { ...old, records: rescanned.records, position: rescanned.position };
+    expect(
+      decodeScanCache(
+        JSON.parse(makeScanCacheWriter()(new Map([[path, current]]), {})),
+        new Map([["omp", ompUsageFormat]]),
+      ).get(path),
+    ).toEqual(current);
   });
 
   it("resumes an OMP session header so appended messages keep their session", async () => {

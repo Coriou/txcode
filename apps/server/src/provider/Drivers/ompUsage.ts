@@ -31,6 +31,14 @@ const Usage = Schema.Struct({
 const Entry = Schema.Union([
   Schema.Struct({ type: Schema.Literal("session"), id: Schema.NonEmptyString }),
   Schema.Struct({
+    type: Schema.Literal("model_usage"),
+    id: Schema.NonEmptyString,
+    timestamp: Schema.String,
+    provider: Schema.NonEmptyString,
+    model: Schema.NonEmptyString,
+    usage: Usage,
+  }),
+  Schema.Struct({
     type: Schema.Literal("message"),
     id: Schema.NonEmptyString,
     timestamp: Schema.String,
@@ -55,8 +63,9 @@ function parseRecord(parsed: unknown, state: typeof OmpScanState.Type): readonly
   }
   const timestampMs = parseTimestampMs(entry.timestamp);
   if (timestampMs === null) return [];
-  const usage = entry.message.usage;
-  const model = `${entry.message.provider}/${entry.message.model}`;
+  const call = entry.type === "model_usage" ? entry : entry.message;
+  const usage = call.usage;
+  const model = `${call.provider}/${call.model}`;
   const totals = {
     uncachedInputTokens: tokenCount(usage.input),
     cachedInputTokens: tokenCount(usage.cacheRead),
@@ -75,7 +84,7 @@ function parseRecord(parsed: unknown, state: typeof OmpScanState.Type): readonly
       timestampMs,
       model,
       // Pricing tables key on the bare model id OMP stores, not the provider-prefixed display id.
-      rateModel: entry.message.model,
+      rateModel: call.model,
       sessionId: state.sessionId,
       totals,
       reportedCostUsd,
@@ -91,6 +100,9 @@ export const ompUsageFormat: TranscriptUsageFormat<typeof OmpScanState.Type> = {
     type: true,
     id: true,
     timestamp: true,
+    provider: true,
+    model: true,
+    usage: true,
     message: { role: true, provider: true, model: true, usage: true },
   },
   usageMarkers: ['"usage"', '"session"'],
