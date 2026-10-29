@@ -6,7 +6,7 @@ import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
 
-import { destinationUpdatePolicy } from "../forkUpdatePolicy.ts";
+import { destinationUpdatePolicy, MANUAL_UPDATE_REASON } from "../forkUpdatePolicy.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
@@ -77,7 +77,7 @@ function formatServiceStatus(status: BootService.BootServiceStatus, cliVersion: 
     return "Tx Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return "Tx Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return `Tx Code service\n  Status: not installed\n  Next: ${destinationUpdatePolicy.serverUpdate === "manual" ? MANUAL_UPDATE_REASON : "Run `t3 service install`."}`;
   }
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
@@ -94,7 +94,9 @@ function formatServiceStatus(status: BootService.BootServiceStatus, cliVersion: 
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Run \`t3 update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`t3 service install\` explicitly.`,
+      destinationUpdatePolicy.serverUpdate === "manual"
+        ? `  Next: ${MANUAL_UPDATE_REASON}`
+        : `  Next: Run \`t3 update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`t3 service install\` explicitly.`,
     ].join("\n");
   }
   return [
@@ -103,7 +105,13 @@ function formatServiceStatus(status: BootService.BootServiceStatus, cliVersion: 
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : ["  Next: Run `t3 service install` to repair it."]),
+    ...(status.current
+      ? []
+      : [
+          destinationUpdatePolicy.serverUpdate === "manual"
+            ? `  Next: ${MANUAL_UPDATE_REASON}`
+            : "  Next: Run `t3 service install` to repair it.",
+        ]),
   ].join("\n");
 }
 
@@ -232,6 +240,10 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
   if (installed && current) {
     yield* Console.log("Tx Code is already set up to run in the background on this machine.");
     return "ready" as const;
+  }
+  if (destinationUpdatePolicy.serverUpdate === "manual") {
+    yield* Console.log(MANUAL_UPDATE_REASON);
+    return "skipped" as const;
   }
   for (const problem of status.problems ?? []) {
     yield* Console.warn(`[${problem}] ${BootService.formatBootServiceProblem(problem)}`);

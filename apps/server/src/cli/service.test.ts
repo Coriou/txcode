@@ -167,26 +167,34 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
   );
 });
 
-it.effect("leaves a newer service unchanged during onboarding without prompting", () =>
-  Effect.gen(function* () {
-    const { service, installOptions } = makeTestService(newerServiceStatus);
-    const terminal = Terminal.make({
-      columns: Effect.succeed(80),
-      rows: Effect.succeed(24),
-      readInput: Effect.die("Onboarding must not prompt to replace a newer service."),
-      readLine: Effect.die("Onboarding must not prompt to replace a newer service."),
-      display: () => Effect.die("Onboarding must not prompt to replace a newer service."),
-    });
+it.effect.each([
+  { serviceStatus: newerServiceStatus, support: "supported" },
+  { serviceStatus: { ...status, installed: false, current: false }, support: "manual" },
+  { serviceStatus: { ...status, current: false }, support: "manual" },
+])(
+  "leaves unsupported or newer service setup unchanged without prompting ($support)",
+  ({ serviceStatus, support }) =>
+    Effect.gen(function* () {
+      policy.serverUpdate = support;
+      const { service, installOptions } = makeTestService(serviceStatus);
+      const terminal = Terminal.make({
+        columns: Effect.succeed(80),
+        rows: Effect.succeed(24),
+        readInput: Effect.die("Onboarding must not prompt for unsupported or newer service setup."),
+        readLine: Effect.die("Onboarding must not prompt for unsupported or newer service setup."),
+        display: () =>
+          Effect.die("Onboarding must not prompt for unsupported or newer service setup."),
+      });
 
-    const ready = yield* offerServiceDuringOnboarding.pipe(
-      Effect.provideService(BootService.BootService, service),
-      Effect.provideService(Terminal.Terminal, terminal),
-      Effect.provide(NodeServices.layer),
-    );
+      const ready = yield* offerServiceDuringOnboarding.pipe(
+        Effect.provideService(BootService.BootService, service),
+        Effect.provideService(Terminal.Terminal, terminal),
+        Effect.provide(NodeServices.layer),
+      );
 
-    expect(ready).toBe("skipped");
-    expect(installOptions).toEqual([]);
-  }),
+      expect(ready).toBe("skipped");
+      expect(installOptions).toEqual([]);
+    }),
 );
 
 // regression: #9602 diagnose incomplete headless server setup
