@@ -270,7 +270,7 @@ describe("withoutSnoozeOccupant", () => {
 
 describe("spaceSnoozePresets", () => {
   const presets = resolveSnoozePresets(new Date(NOW));
-  const tomorrowUntil = presets.find((preset) => preset.id === "tomorrow")!.snoozedUntil;
+  const tomorrowUntil = presets.find((preset) => preset.id === "at:tomorrow:09:00")!.snoozedUntil;
 
   it("returns the resolver's presets untouched when spacing is disabled", () => {
     expect(spaceSnoozePresets(presets, { spacingMinutes: 0 })).toBe(presets);
@@ -281,11 +281,11 @@ describe("spaceSnoozePresets", () => {
       spacingMinutes: 5,
       occupied: occupancy(tomorrowUntil),
     });
-    expect(shifted.find((preset) => preset.id === "tomorrow")?.snoozedUntil).toBe(
+    expect(shifted.find((preset) => preset.id === "at:tomorrow:09:00")?.snoozedUntil).toBe(
       plusMinutes(tomorrowUntil, 5),
     );
-    expect(shifted.find((preset) => preset.id === "hour")).toEqual(
-      presets.find((preset) => preset.id === "hour"),
+    expect(shifted.find((preset) => preset.id === "after:60")).toEqual(
+      presets.find((preset) => preset.id === "after:60"),
     );
   });
 
@@ -295,7 +295,7 @@ describe("spaceSnoozePresets", () => {
       occupied: occupancy(tomorrowUntil),
       formatWhenLabel: (_preset, snoozedUntil) => `shifted ${snoozedUntil}`,
     });
-    expect(shifted.find((preset) => preset.id === "tomorrow")?.whenLabel).toBe(
+    expect(shifted.find((preset) => preset.id === "at:tomorrow:09:00")?.whenLabel).toBe(
       `shifted ${plusMinutes(tomorrowUntil, 5)}`,
     );
   });
@@ -305,7 +305,7 @@ describe("spaceSnoozePresets", () => {
       spacingMinutes: 5,
       occupied: occupancy(tomorrowUntil),
     });
-    expect(shifted.find((preset) => preset.id === "tomorrow")?.whenLabel).toBe(
+    expect(shifted.find((preset) => preset.id === "at:tomorrow:09:00")?.whenLabel).toBe(
       new Date(plusMinutes(tomorrowUntil, 5)).toLocaleTimeString(undefined, {
         hour: "numeric",
         minute: "2-digit",
@@ -317,11 +317,11 @@ describe("spaceSnoozePresets", () => {
     vi.stubEnv("TZ", "Europe/Berlin");
     const now = new Date(2026, 2, 28, 12, 0);
     const dstPresets = resolveSnoozePresets(now);
-    const tomorrow = dstPresets.find((preset) => preset.id === "tomorrow")!;
+    const tomorrow = dstPresets.find((preset) => preset.id === "at:tomorrow:09:00")!;
     const shifted = spaceSnoozePresets(dstPresets, {
       spacingMinutes: 5,
       occupied: occupancy(tomorrow.snoozedUntil),
-    }).find((preset) => preset.id === "tomorrow")!;
+    }).find((preset) => preset.id === "at:tomorrow:09:00")!;
     const shiftedDate = new Date(shifted.snoozedUntil);
     expect(shiftedDate.getDate()).toBe(29);
     expect(shiftedDate.getHours()).toBe(9);

@@ -1,11 +1,6 @@
 // @effect-diagnostics globalDate:off -- Slot allocation works in epoch milliseconds.
 // Fork-local: spread snoozes that would otherwise wake together; upstream has no equivalent.
-import {
-  effectiveSnoozed,
-  snoozePresetWhenLabel,
-  type SnoozePreset,
-  type ThreadSnoozeShell,
-} from "./threadSettled.ts";
+import { effectiveSnoozed, type SnoozePreset, type ThreadSnoozeShell } from "./threadSettled.ts";
 
 /** A crowded preset still wakes within the hour; past that, colliding snoozes share the last slot. */
 const MAX_SNOOZE_SPACING_OFFSET_MS = 60 * 60 * 1_000;
@@ -54,7 +49,11 @@ export function snoozeOccupancyFromReservationKey(reservationKey: string): Snooz
 }
 
 function formatSnoozeWhenLabel(preset: SnoozePreset, snoozedUntil: string): string {
-  return snoozePresetWhenLabel(preset.id, new Date(snoozedUntil));
+  const wake = new Date(snoozedUntil);
+  const time = wake.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  // "Next week" does not name its day; every other preset label already does, or is a duration.
+  if (preset.label !== "Next week") return time;
+  return `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
 }
 
 /**

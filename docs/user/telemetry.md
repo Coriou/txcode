@@ -27,13 +27,13 @@ Linux, so export it there and restart the app. On Windows, set it as a user envi
 
 ## Mobile app crash reports
 
-When the iOS or Android app crashes or hits an error, it sends a report to T3 Code: the error
+When the iOS or Android app crashes or hits an error, it sends a report to Tx Code: the error
 message, the stack trace, the app version, and the device model and OS version. Each launch also
 sends startup timings, and every report carries a random ID for the install. Reports go through
 the T3 Connect relay to Axiom. They do not include your threads, prompts, or connection details,
 but an error message can quote a value the app was handling.
 
-To stop sending them, turn off **Send crash reports** in **Settings > About T3 Code > Diagnostics**.
+To stop sending them, turn off **Send crash reports** in **Settings > About Tx Code > Diagnostics**.
 
 ## Export diagnostics to your own receiver
 

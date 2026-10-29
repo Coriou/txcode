@@ -78,11 +78,9 @@ function threadShowingBrowser(
 }
 
 /**
- * Opens each link the OS hands Tx Code. Prompt and thread links, by `t3code://`
- * or as hosted-app pages, open in the app. Other web links and HTML files arrive
- * because Tx Code is the default browser (macOS): with a browser panel on screen
- * the page opens as a new tab there; otherwise it starts a thread without a
- * project, its browser panel maximized.
+ * Opens each OS link in Tx Code. `t3code://` and hosted pages open in the app.
+ * As the default macOS browser, other links and HTML files open in an on-screen
+ * browser tab, or a projectless thread with its browser panel maximized.
  */
 export function DesktopWebLinkCoordinator() {
   const router = useRouter();

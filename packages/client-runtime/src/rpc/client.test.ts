@@ -519,7 +519,7 @@ describe("terminal subscription failures", () => {
       let handled = 0;
       let calls = 0;
       const client = {
-        [WS_METHODS.subscribeTerminalEvents]: () => {
+        [WS_METHODS.subscribeTerminalMetadata]: () => {
           calls += 1;
           return Stream.fail(transport);
         },
@@ -527,7 +527,7 @@ describe("terminal subscription failures", () => {
       const { activeSession, supervisor } = yield* makeHarness();
       yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
       const fiber = yield* subscribe(
-        WS_METHODS.subscribeTerminalEvents,
+        WS_METHODS.subscribeTerminalMetadata,
         {},
         {
           onDefect: () => Queue.offer(observed, undefined),

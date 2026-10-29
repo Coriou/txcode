@@ -146,6 +146,17 @@ vi.mock(import("../state/shell"), async (original) => {
     },
   };
 });
+vi.mock(import("../state/threads"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    environmentThreadShells: {
+      ...actual.environmentThreadShells,
+      // Parent approval is this atom, not the child's own shell row. The child is hidden.
+      pendingSubagentRequestsAtom: (() => subagentRequestsAtom) as never,
+    },
+  };
+});
 vi.mock(import("../state/presentation"), async (original) => {
   const actual = await original();
   return {
@@ -177,6 +188,32 @@ import { threadNotificationTag } from "../threadNotifications";
 const notificationTag = threadNotificationTag("env-1" as never, "thread-1" as never);
 let registry: AtomRegistry.AtomRegistry;
 const shellAtom = Atom.family((_id: string) => Atom.make<unknown>(null));
+const NO_SUBAGENT_REQUESTS: ReadonlyMap<string, "approval"> = new Map();
+const subagentRequestsAtom = Atom.make((get) => {
+  const shell = get(shellAtom("env-1")) as {
+    snapshot?: {
+      readonly value?: {
+        readonly threads?: ReadonlyArray<{
+          readonly lineage?: {
+            readonly parentThreadId?: string | null;
+            readonly relationshipToParent?: string | null;
+          };
+          readonly pendingRuntimeRequest?: { readonly kind?: string } | null;
+        }>;
+      };
+    };
+  } | null;
+  const threads = shell?.snapshot?.value?.threads ?? [];
+  const requests = new Map<string, "approval">();
+  for (const thread of threads) {
+    if (thread.lineage?.relationshipToParent !== "subagent") continue;
+    const kind = thread.pendingRuntimeRequest?.kind;
+    if (kind === undefined || kind === "user_input" || kind === "auth_refresh") continue;
+    const parentId = thread.lineage.parentThreadId;
+    if (parentId != null) requests.set(parentId, "approval");
+  }
+  return requests.size === 0 ? NO_SUBAGENT_REQUESTS : requests;
+});
 const environmentIdsAtom = Atom.make<ReadonlyArray<string>>([]);
 const router = {
   state: { matches: [] as Array<{ params: { environmentId?: string; threadId?: string } }> },

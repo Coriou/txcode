@@ -80,23 +80,36 @@ describe("resolveThreadListV2SnoozeMenuSelection", () => {
 
   it("dispatches the staggered slot the menu showed", () => {
     const selectedAt = new Date(2026, 4, 8, 10, 30);
+    const base = resolveThreadListV2SnoozePresets({
+      secondary: "snooze",
+      now: selectedAt.toISOString(),
+      presets: undefined,
+    });
+    const tomorrow = base.find((preset) => preset.id === "at:tomorrow:09:00");
     const spacing = {
-      occupied: new Map([[selectedAt.getTime() + 60 * 60 * 1_000, 1]]),
+      occupied: new Map([[Date.parse(tomorrow?.snoozedUntil ?? ""), 1]]),
       spacingMinutes: 5,
     };
-    const displayedPresets = resolveThreadListV2SnoozePresets(selectedAt, spacing);
+    const displayedPresets = resolveThreadListV2SnoozePresets({
+      secondary: "snooze",
+      now: selectedAt.toISOString(),
+      presets: undefined,
+      spacing,
+    });
     const selection = resolveThreadListV2SnoozeMenuSelection({
-      event: "snooze:hour",
+      event: "snooze:at:tomorrow:09:00",
       displayedPresets,
       now: selectedAt,
-      spacing,
+      presets: undefined,
     });
 
     expect(selection._tag).toBe("selected");
     if (selection._tag === "selected") {
-      expect(selection.preset).toEqual(displayedPresets.find((preset) => preset.id === "hour"));
+      expect(selection.preset).toEqual(
+        displayedPresets.find((preset) => preset.id === "at:tomorrow:09:00"),
+      );
       expect(selection.preset.snoozedUntil).toBe(
-        new Date(selectedAt.getTime() + 65 * 60 * 1_000).toISOString(),
+        new Date(Date.parse(tomorrow?.snoozedUntil ?? "") + 5 * 60 * 1_000).toISOString(),
       );
     }
   });
