@@ -1,3 +1,4 @@
+import { beforeEach, vi } from "vite-plus/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -20,6 +21,20 @@ import {
   SERVICE_RESTART_PENDING_FILE,
   serviceStateHasPendingUpdate,
 } from "./serviceProtocol.ts";
+
+const policy = vi.hoisted(() => ({
+  distribution: "txcode",
+  serverUpdate: "supported",
+  desktopUpdate: "supported",
+}));
+vi.mock("../forkUpdatePolicy.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../forkUpdatePolicy.ts")>()),
+  destinationUpdatePolicy: policy,
+}));
+beforeEach(() => {
+  policy.serverUpdate = "supported";
+  policy.desktopUpdate = "supported";
+});
 
 it("reads the served T3 home back out of a rendered unit or plist", () => {
   const plan = (baseDir: string) => ({
@@ -181,7 +196,9 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
                 ...(environmentPath === undefined || environmentPath === ""
                   ? {}
                   : { PATH: environmentPath }),
-                ...(insideService ? { T3_BOOT_SERVICE_UNIT: "t3code.service" } : {}),
+                ...(insideService
+                  ? { T3_BOOT_SERVICE_UNIT: BootService.BOOT_SERVICE_UNIT_FILE }
+                  : {}),
               },
             }),
           ),
@@ -204,6 +221,22 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
 });
 
 it.layer(NodeServices.layer)("boot service install", (it) => {
+  it.effect.each(["linux", "darwin"] as const)(
+    "refuses fork installation before cached runtime activation on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        policy.serverUpdate = "manual";
+        const { service, fs, statePath, commands, runtime } = yield* makeHarness(platform);
+        const error = yield* service
+          .install({ start: false, allowDowngrade: true })
+          .pipe(Effect.flip);
+        expect(error.message).toContain("installed manually");
+        expect(commands).toEqual([]);
+        expect(yield* fs.exists(statePath)).toBe(false);
+        expect(yield* fs.readFileString(runtime.sentinelPath)).toBe("1.2.3\n");
+      }),
+  );
+
   it.effect(
     "fails before installing files or validating a runtime when lingering needs an administrator",
     () =>
@@ -299,6 +332,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     Effect.gen(function* () {
       const { service, fs, statePath, timeouts, runtime } = yield* makeHarness();
       const plan = yield* service.install();
+      policy.serverUpdate = "manual";
 
       expect(parseServiceState(yield* fs.readFileString(statePath))).toEqual({
         protocol: SERVICE_LAUNCHER_PROTOCOL,
@@ -532,6 +566,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     Effect.gen(function* () {
       const { service, commands, control, makeService } = yield* makeHarness();
       yield* service.install();
+      policy.serverUpdate = "manual";
       const failure = yield* service
         .withStopped(
           Effect.suspend(() => Effect.fail(control.active ? "running" : "repair failed")),
@@ -623,7 +658,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       expect(yield* fs.readFileString(statePath)).toBe(state);
       expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
-      expect(commands).not.toContain("systemctl --user stop t3code.service");
+      expect(commands).not.toContain("systemctl --user stop txcode.service");
       expect(result).toMatchObject({ handedOff: true, logPath: plan.logPath });
       const handoffs = invocations.filter(({ command }) => command === "systemd-run");
       expect(handoffs).toHaveLength(1);
@@ -649,7 +684,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(yield* fs.readFileString(statePath)).toBe(state);
       expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
       expect(control.active).toBe(true);
-      expect(commands).not.toContain("systemctl --user stop t3code.service");
+      expect(commands).not.toContain("systemctl --user stop txcode.service");
     }),
   );
 
@@ -659,6 +694,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       Effect.gen(function* () {
         const { service, fs, statePath, commands, control, makeService } = yield* makeHarness();
         const plan = yield* service.install();
+        policy.serverUpdate = "manual";
         const state = yield* fs.readFileString(statePath);
         const marker = `${plan.baseDir}/runtime/${SERVICE_RESTART_PENDING_FILE}`;
         yield* fs.writeFileString(marker, "1.2.3\n");
@@ -676,8 +712,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         const outcome = yield* inside.restart;
         expect(commands).toEqual([
           "systemctl --user daemon-reload",
-          "systemctl --user enable t3code.service",
-          "systemctl --user restart --no-block t3code.service",
+          "systemctl --user enable txcode.service",
+          "systemctl --user restart --no-block txcode.service",
         ]);
         expect(outcome).toBe("queued");
         expect(yield* fs.readFileString(statePath)).toBe(state);

@@ -20,12 +20,31 @@ const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same T3 Code version.";
 
 describe("versionSkew", () => {
-  it("updates only the proven npm prefix and safely quotes its path", () => {
-    expect(manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/node" })).toBe(
-      "npm install --global --prefix '/opt/node' t3@0.0.45",
-    );
+  const upstream = {
+    distribution: "t3",
+    serverUpdate: "supported",
+    desktopUpdate: "supported",
+  } as const;
+  it("never supplies an upstream npm command for fork or unknown destinations", () => {
+    expect(manualServerUpdateCommand("0.0.45")).toBeNull();
     expect(
-      manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/maria's node" }),
+      manualServerUpdateCommand("0.0.45", undefined, {
+        distribution: "txcode",
+        serverUpdate: "manual",
+        desktopUpdate: "manual",
+      }),
+    ).toBeNull();
+  });
+  it("updates only the proven npm prefix and safely quotes its path", () => {
+    expect(
+      manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/node" }, upstream),
+    ).toBe("npm install --global --prefix '/opt/node' t3@0.0.45");
+    expect(
+      manualServerUpdateCommand(
+        "0.0.45",
+        { kind: "npm-global", prefix: "/opt/maria's node" },
+        upstream,
+      ),
     ).toBe("npm install --global --prefix '/opt/maria'\\''s node' t3@0.0.45");
   });
   beforeEach(() => {

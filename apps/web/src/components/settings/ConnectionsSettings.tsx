@@ -203,6 +203,7 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
           environmentId: environment.environmentId,
           serverLabel: environment.label,
           selfUpdate,
+          updatePolicy: environment.serverConfig?.environment.updatePolicy,
           installation: environment.serverConfig?.environment.capabilities.serverInstallation,
           desktopAppUpdate,
           targetVersion: mismatch.clientVersion,
@@ -1092,6 +1093,7 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
                       serverLabel={
                         primaryEnvironment ? `${primaryEnvironment.label} server` : "server"
                       }
+                      updatePolicy={primaryServerConfig?.environment.updatePolicy}
                       selfUpdate={resolveServerSelfUpdateCapability(primaryServerConfig)}
                       installation={
                         primaryServerConfig?.environment.capabilities.serverInstallation

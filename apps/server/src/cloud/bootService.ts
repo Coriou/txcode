@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 
+import { destinationUpdatePolicy, MANUAL_UPDATE_REASON } from "../forkUpdatePolicy.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import {
   ensurePinnedRuntimeInstalled,
@@ -398,6 +399,15 @@ export class BootServiceCommandError extends Schema.TaggedError<BootServiceComma
   }
 }
 
+export class BootServiceManualUpdateError extends Schema.TaggedError<BootServiceManualUpdateError>()(
+  "BootServiceManualUpdateError",
+  {},
+) {
+  override get message(): string {
+    return MANUAL_UPDATE_REASON;
+  }
+}
+
 export class BootServiceInstallError extends Schema.TaggedError<BootServiceInstallError>()(
   "BootServiceInstallError",
   { cause: Schema.Defect() },
@@ -467,6 +477,7 @@ export class BootServiceDowngradeRefusedError extends Schema.TaggedError<BootSer
 export type BootServiceError =
   | BootServiceUnsupportedError
   | BootServiceCommandError
+  | BootServiceManualUpdateError
   | BootServiceInstallError
   | BootServicePrerequisiteError
   | BootServiceUpdatePendingError
@@ -711,6 +722,9 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     readonly allowDowngrade?: boolean;
     readonly start?: boolean;
   }) {
+    if (destinationUpdatePolicy.serverUpdate === "manual") {
+      return yield* new BootServiceManualUpdateError({});
+    }
     const manager = yield* requireManager;
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })

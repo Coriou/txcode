@@ -153,11 +153,20 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
+// Fork-local: update support is owned by the destination, independently of its version.
+export const EnvironmentUpdatePolicy = Schema.Struct({
+  distribution: Schema.Literals(["txcode", "t3"]),
+  serverUpdate: Schema.Literals(["supported", "manual"]),
+  desktopUpdate: Schema.Literals(["supported", "manual"]),
+});
+export type EnvironmentUpdatePolicy = typeof EnvironmentUpdatePolicy.Type;
+
 export const ExecutionEnvironmentDescriptor = Schema.Struct({
   environmentId: EnvironmentId,
   label: TrimmedNonEmptyString,
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
+  updatePolicy: ForwardCompatibleOptional(EnvironmentUpdatePolicy),
   orchestrationProtocolVersion: Schema.optionalKey(Schema.Int),
   capabilities: ExecutionEnvironmentCapabilities,
 });

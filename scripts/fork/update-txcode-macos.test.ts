@@ -36,6 +36,7 @@ async function fixture(
     installed?: boolean | "nightly";
     rollbackId?: string;
     confirms?: number;
+    transferFailure?: "lookup" | "dmg" | "checksum";
   } = {},
 ) {
   const root = await NodeFSP.realpath(
@@ -119,6 +120,14 @@ const args = process.argv.slice(2);
 const root = process.env.TXCODE_UPDATE_FIXTURE_ROOT;
 fs.appendFileSync(path.join(root, 'calls'), name + ' ' + args.join(' ') + '\\n');
 if (name === 'uname') console.log(args[0] === '-s' ? 'Darwin' : ${JSON.stringify(options.arm ? "arm64" : "x86_64")});
+else if (name === 'curl') {
+  const failure = ${JSON.stringify(options.transferFailure)};
+  const url = args.find((arg) => arg.startsWith('http'));
+  const selected = failure === 'lookup' ? url.includes('/releases?') : failure === 'dmg' ? url.endsWith('.dmg') : failure === 'checksum' && url.endsWith('/SHA256SUMS');
+  if (selected && args.includes('--connect-timeout') && args.includes('--max-time')) process.exit(28);
+  const result = require('node:child_process').spawnSync('/usr/bin/curl', args, { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
 else if (name === 'launchctl') console.log('PID Status Label');
 else if (name === 'plutil') {
   try {
@@ -136,7 +145,16 @@ else if (name === 'open') process.exit(99);
 `,
       { mode: 0o755 },
     );
-    for (const name of ["uname", "launchctl", "plutil", "hdiutil", "ditto", "file", "open"]) {
+    for (const name of [
+      "uname",
+      "launchctl",
+      "plutil",
+      "hdiutil",
+      "ditto",
+      "file",
+      "open",
+      "curl",
+    ]) {
       await NodeFSP.symlink(shim, NodePath.join(bin, name));
     }
     const manifest =
@@ -390,4 +408,30 @@ it("upgrades the legacy nightly bundle to Tx Code.app", async () => {
   expect(result.code, result.output).toBe(0);
   expect(result.apps).toEqual(["Tx Code.app"]);
   expect(result.previous).toContain("Tx Code (Nightly).app");
+});
+
+it.each([
+  ["lookup", "Release lookup failed"],
+  ["dmg", "DMG download failed"],
+  ["checksum", "Checksum download failed"],
+] as const)(
+  "aborts a bounded %s transfer failure before copying",
+  async (transferFailure, message) => {
+    const result = await fixture({ transferFailure, installed: true });
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain(message);
+    expect(result.calls).not.toMatch(/hdiutil|ditto|open /);
+    expect(result.calls).toContain("--connect-timeout 15 --max-time 900");
+    expect(result.apps).toEqual(["Tx Code.app"]);
+    expect(result.backups).toEqual([]);
+  },
+);
+it("reports a completed installation separately when launch fails", async () => {
+  const result = await fixture({ installed: true, confirms: 3 });
+  expect(result.code, result.output).toBe(1);
+  expect(result.output).toContain("Installed:");
+  expect(result.output).toContain("Launch request failed; the installed app and backup were kept");
+  expect(result.apps).toEqual(["Tx Code.app"]);
+  expect(result.previous).toContain("Tx Code.app");
+  expect(result.previous).toContain("complete");
 });

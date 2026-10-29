@@ -35,6 +35,7 @@ const descriptor = (protocol: number | undefined, serverVersion: string) =>
     label: TARGET.label,
     platform: { os: "darwin", arch: "arm64" },
     serverVersion,
+    updatePolicy: { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
     ...(protocol === undefined ? {} : { orchestrationProtocolVersion: protocol }),
     capabilities: { repositoryIdentity: true, serverSelfUpdate: "boot-service" },
   }) satisfies ExecutionEnvironmentDescriptor;
@@ -249,7 +250,8 @@ describe("updateOutdatedHost", () => {
     Effect.gen(function* () {
       const manual = {
         ...descriptor(undefined, "0.0.45"),
-        capabilities: { repositoryIdentity: true },
+        updatePolicy: undefined,
+        capabilities: { repositoryIdentity: true, serverSelfUpdate: "boot-service" as const },
       };
       let opened = false;
       const error = yield* Effect.flip(

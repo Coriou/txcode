@@ -1,5 +1,15 @@
 import { RegistryContext } from "@effect/atom-react";
-import { AuthSessionState, type EnvironmentId } from "@t3tools/contracts";
+import {
+  AuthSessionState,
+  type EnvironmentId,
+  ORCHESTRATION_PROTOCOL_VERSION,
+} from "@t3tools/contracts";
+import {
+  BearerConnectionTarget,
+  BearerConnectionProfile,
+  orchestrationProtocolCompatibilityError,
+} from "@t3tools/client-runtime/connection";
+import * as Option from "effect/Option";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -30,6 +40,7 @@ vi.mock(import("~/state/session"), async (original) => {
   const actual = await original();
   return {
     ...actual,
+    usePreparedConnection: () => Option.none(),
     environmentSession: {
       ...actual.environmentSession,
       sessionStateAtom: (() => testState.sessionAtom) as never,
@@ -44,6 +55,12 @@ vi.mock(import("./ui/toast"), async (original) => {
   const actual = await original();
   return { ...actual, toastManager: { ...actual.toastManager, add: testState.toast } };
 });
+
+vi.mock(import("~/state/environments"), async (original) => ({
+  ...(await original()),
+  useRelayEnvironmentDiscovery: () => ({ environments: new Map() }) as never,
+}));
+import { SavedBackendListRow } from "./settings/SavedEnvironmentRows";
 
 import { resetConfirmDialogForTests } from "~/confirmDialog";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
@@ -112,6 +129,7 @@ function renderAction(props: Partial<Parameters<typeof ServerUpdateAction>[0]> =
     <ServerUpdateAction
       environmentId={"env-test" as EnvironmentId}
       serverLabel="Test server"
+      updatePolicy={{ distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" }}
       selfUpdate="boot-service"
       targetVersion="0.0.31"
       {...props}
@@ -174,12 +192,14 @@ describe("ServerUpdatesAction", () => {
     {
       environmentId: "batch-a" as EnvironmentId,
       serverLabel: "Laptop",
+      updatePolicy: { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
       selfUpdate: "boot-service",
       targetVersion: "0.0.31",
     },
     {
       environmentId: "batch-b" as EnvironmentId,
       serverLabel: "Office",
+      updatePolicy: { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
       selfUpdate: "respawn",
       targetVersion: "0.0.31",
     },
@@ -212,4 +232,73 @@ describe("ServerUpdatesAction", () => {
     );
     expect(button(screen, "Update all")!.disabled).toBe(false);
   });
+});
+
+describe("SavedBackendListRow outdated host", () => {
+  it.each([
+    { distribution: "t3", serverUpdate: "supported", desktopUpdate: "supported" },
+    { distribution: "txcode", serverUpdate: "manual", desktopUpdate: "manual" },
+    undefined,
+  ] as const)(
+    "keeps direct-host eligibility independent of relay discovery: %j",
+    async (updatePolicy) => {
+      using _state = setup();
+      const environmentId = "env-direct-old" as EnvironmentId;
+      const blocked = orchestrationProtocolCompatibilityError({
+        environmentId,
+        label: "Direct host",
+        platform: { os: "linux", arch: "x64" },
+        serverVersion: "0.0.1",
+        orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION - 1,
+        updatePolicy,
+        capabilities: { repositoryIdentity: true, serverSelfUpdate: "boot-service" },
+      });
+      expect(blocked).toMatchObject({ reason: "unsupported" });
+      testState.updateServer.mockResolvedValue(success());
+      await using screen = await renderUpdate(
+        <SavedBackendListRow
+          environment={{
+            environmentId,
+            label: "Direct host",
+            displayUrl: "http://direct.tailnet.test:3773",
+            relayManaged: false,
+            serverConfig: null,
+            connection: { phase: "unsupported", error: blocked!.message, traceId: null },
+            entry: {
+              target: new BearerConnectionTarget({
+                environmentId,
+                label: "Direct host",
+                connectionId: "direct",
+              }),
+              profile: Option.some(
+                new BearerConnectionProfile({
+                  environmentId,
+                  label: "Direct host",
+                  connectionId: "direct",
+                  httpBaseUrl: "http://direct.tailnet.test:3773",
+                  wsBaseUrl: "ws://direct.tailnet.test:3773",
+                }),
+              ),
+              enabled: true,
+              serverUpdateRequired: blocked!.serverUpdateRequired === true,
+            },
+          }}
+          removingEnvironmentId={null}
+          onSetEnabled={vi.fn()}
+          onRemove={vi.fn()}
+          onAddRoute={vi.fn()}
+        />,
+      );
+      const supported = updatePolicy?.distribution === "t3";
+      expect(button(screen, "Update") !== undefined).toBe(supported);
+      if (supported) {
+        await click(screen, "Update");
+        expect(testState.updateServer).toHaveBeenCalledWith(
+          expect.objectContaining({ environmentId }),
+        );
+      } else {
+        expect(testState.updateServer).not.toHaveBeenCalled();
+      }
+    },
+  );
 });

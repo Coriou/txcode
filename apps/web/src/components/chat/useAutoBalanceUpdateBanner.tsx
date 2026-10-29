@@ -1,3 +1,4 @@
+import { supportsDestinationServerUpdate } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { useState } from "react";
@@ -41,6 +42,14 @@ export function useAutoBalanceUpdateBanner(
     () => new Set(),
   );
   const machines = states.flatMap(({ environment, state }) => {
+    if (
+      state.status === "idle" &&
+      !supportsDestinationServerUpdate(
+        environment.serverConfig?.environment.updatePolicy,
+        environment.serverConfig?.environment.capabilities.serverSelfUpdate === "desktop-managed",
+      )
+    )
+      return [];
     const mismatch = resolveServerConfigVersionMismatch(environment.serverConfig);
     const dismissKey = mismatch
       ? buildVersionMismatchDismissalKey(environment.environmentId, mismatch)
@@ -60,6 +69,7 @@ export function useAutoBalanceUpdateBanner(
         environmentId: environment.environmentId,
         serverLabel: environment.label,
         selfUpdate,
+        updatePolicy: environment.serverConfig?.environment.updatePolicy,
         installation: environment.serverConfig?.environment.capabilities.serverInstallation,
         desktopAppUpdate,
         targetVersion: state.status === "idle" ? mismatch!.clientVersion : state.targetVersion,

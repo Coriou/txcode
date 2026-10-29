@@ -3,6 +3,7 @@ import {
   sessionGrantsScope,
   type AuthSessionState,
   type ExecutionEnvironmentCapabilities,
+  type EnvironmentUpdatePolicy,
   type ServerProvider,
 } from "@t3tools/contracts";
 import {
@@ -11,6 +12,7 @@ import {
   cliReleaseIndexPageUrl,
   newestCliReleaseVersion,
 } from "@t3tools/shared/cliRelease";
+import { supportsDestinationServerUpdate } from "@t3tools/client-runtime/environment";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import * as Schema from "effect/Schema";
 
@@ -24,8 +26,13 @@ export function canMaintainEnvironment(session: AuthSessionState | null, connect
 
 export function supportsEnvironmentUpdate(
   capabilities: Pick<ExecutionEnvironmentCapabilities, "serverSelfUpdate" | "desktopAppUpdate">,
+  updatePolicy?: EnvironmentUpdatePolicy,
 ) {
   return (
+    supportsDestinationServerUpdate(
+      updatePolicy,
+      capabilities.serverSelfUpdate === "desktop-managed",
+    ) &&
     capabilities.serverSelfUpdate !== undefined &&
     (capabilities.serverSelfUpdate !== "desktop-managed" || capabilities.desktopAppUpdate === true)
   );
@@ -59,7 +66,13 @@ async function fetchReleases(url: string, accept: string, signal: AbortSignal) {
   return response;
 }
 
-export async function findEnvironmentUpdate(currentVersion: string, signal: AbortSignal) {
+export async function findEnvironmentUpdate(
+  currentVersion: string,
+  signal: AbortSignal,
+  updatePolicy?: EnvironmentUpdatePolicy,
+  desktopManaged = false,
+) {
+  if (!supportsDestinationServerUpdate(updatePolicy, desktopManaged)) return null;
   const channel = cliReleaseChannelOf(currentVersion);
   // Public release pages avoid the anonymous API quota shared by devices on the same network.
   const response = await fetchReleases(

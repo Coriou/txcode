@@ -98,7 +98,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
           Effect.provide(
             ServerEnvironment.layer.pipe(
               Layer.provide(layerEmptySecretStore),
-              Layer.provide(ServerConfig.layer({ ...config, mode })),
+              Layer.provide(ServerConfig.layer({ ...config, mode, desktopTelemetryControlFd: 5 })),
             ),
           ),
           Effect.provideService(HostProcess.Arguments, ["node", entry]),
@@ -109,9 +109,14 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         expect(descriptor.capabilities.serverInstallation).toEqual(
           mode === "web" ? { kind: "npm-global", prefix } : undefined,
         );
-        expect(descriptor.capabilities.serverSelfUpdate).toBe(
-          mode === "web" ? undefined : "desktop-managed",
-        );
+        expect(descriptor.capabilities.serverSelfUpdate).toBe(undefined);
+        expect(descriptor.updatePolicy).toEqual({
+          distribution: "txcode",
+          serverUpdate: "manual",
+          desktopUpdate: "manual",
+        });
+        expect(descriptor.capabilities.desktopAppUpdate).toBeUndefined();
+        expect(descriptor.capabilities.serverSelfUpdateProgress).toBeUndefined();
         expect(descriptor.capabilities).toMatchObject({
           settledWorktreeCleanup: true,
           storageCleanupRun: true,

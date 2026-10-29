@@ -1,3 +1,7 @@
+import {
+  destinationManualUpdateInfo,
+  supportsDestinationServerUpdate,
+} from "@t3tools/client-runtime/environment";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
@@ -67,7 +71,7 @@ import {
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import { useEnvironmentProviders } from "../../state/environments";
+import { usePrimaryEnvironment, useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
@@ -145,6 +149,10 @@ function AboutVersionTitle() {
 
 function AboutVersionSection() {
   const updateState = useDesktopUpdateState();
+  const primaryEnvironment = usePrimaryEnvironment();
+  const updatePolicy = primaryEnvironment?.serverConfig?.environment.updatePolicy;
+  const manualDesktop = isElectron && !supportsDestinationServerUpdate(updatePolicy, true);
+  const manualInfo = destinationManualUpdateInfo(updatePolicy);
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);
 
@@ -289,26 +297,52 @@ function AboutVersionSection() {
       <SettingsRow
         id={searchableSetting("app-version").id}
         title={<AboutVersionTitle />}
-        description={description}
+        description={
+          manualDesktop ? (
+            <>
+              {manualInfo.message}
+              {updateState?.status === "checking" ||
+              updateState?.status === "downloading" ||
+              updateState?.status === "error" ? (
+                <> {updateState.message ?? buttonLabel}</>
+              ) : null}
+            </>
+          ) : (
+            description
+          )
+        }
         control={
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={buttonDisabled || isUpdateActionPending}
-                  onClick={handleButtonClick}
-                >
-                  {buttonLabel}
-                </Button>
-              }
-            />
-            {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
-          </Tooltip>
+          manualDesktop ? (
+            manualInfo.url ? (
+              <a
+                href={manualInfo.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm underline"
+              >
+                View releases
+              </a>
+            ) : undefined
+          ) : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={buttonDisabled || isUpdateActionPending}
+                    onClick={handleButtonClick}
+                  >
+                    {buttonLabel}
+                  </Button>
+                }
+              />
+              {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
+            </Tooltip>
+          )
         }
       />
-      {hasDesktopBridge ? (
+      {hasDesktopBridge && !manualDesktop ? (
         <SettingsRow
           {...searchableSetting("update-track")}
           description="Use stable releases or nightly builds. Switch back anytime."

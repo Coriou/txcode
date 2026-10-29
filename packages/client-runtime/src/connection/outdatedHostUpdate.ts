@@ -20,6 +20,7 @@ import * as RpcClient from "effect/rpc/RpcClient";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
 
+import { destinationServerUpdateSupported } from "../environment/updatePolicy.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
 import { makeWsRpcProtocolClient, PING_TIMEOUT } from "../rpc/protocol.ts";
 import { isLegacyUpdateHandoffLoss, resolveServerUpdateProgressResult } from "../state/server.ts";
@@ -102,6 +103,7 @@ export const updateOutdatedHost = Effect.fn("clientRuntime.connection.updateOutd
 
     const capabilities = descriptor.capabilities;
     if (
+      !destinationServerUpdateSupported(descriptor) ||
       capabilities.serverSelfUpdate === undefined ||
       (capabilities.serverSelfUpdate === "desktop-managed" &&
         capabilities.desktopAppUpdate !== true)

@@ -54,7 +54,26 @@ describe("orchestration protocol compatibility", () => {
   });
 
   it("offers a remote update only for an older host that can update itself", () => {
-    const older = descriptor(ORCHESTRATION_PROTOCOL_VERSION - 1);
+    const older = {
+      ...descriptor(ORCHESTRATION_PROTOCOL_VERSION - 1),
+      updatePolicy: {
+        distribution: "t3",
+        serverUpdate: "supported",
+        desktopUpdate: "supported",
+      } as const,
+    };
+    for (const updatePolicy of [
+      undefined,
+      { distribution: "txcode", serverUpdate: "manual", desktopUpdate: "manual" } as const,
+    ]) {
+      const blocked = orchestrationProtocolCompatibilityError({
+        ...older,
+        updatePolicy,
+        capabilities: { repositoryIdentity: true, serverSelfUpdate: "boot-service" },
+      });
+      expect(blocked).toMatchObject({ reason: "unsupported" });
+      expect(blocked).not.toHaveProperty("serverUpdateRequired");
+    }
     const withCapabilities = (capabilities: ExecutionEnvironmentDescriptor["capabilities"]) =>
       orchestrationProtocolCompatibilityError({ ...older, capabilities });
 

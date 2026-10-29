@@ -1,9 +1,11 @@
 import type {
   EnvironmentId,
+  EnvironmentUpdatePolicy,
   ServerConfig,
   ServerInstallation,
   ServerSelfUpdateCapability,
 } from "@t3tools/contracts";
+import { supportsDestinationServerUpdate } from "@t3tools/client-runtime/environment";
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import * as Schema from "effect/Schema";
@@ -86,19 +88,29 @@ export function resolveServerConfigVersionMismatch(
 export function resolveServerSelfUpdateCapability(
   serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
 ): ServerSelfUpdateCapability | null {
-  return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
+  return supportsDestinationServerUpdate(
+    serverConfig?.environment.updatePolicy,
+    serverConfig?.environment.capabilities.serverSelfUpdate === "desktop-managed",
+  )
+    ? (serverConfig?.environment.capabilities.serverSelfUpdate ?? null)
+    : null;
 }
 
 export function supportsDesktopAppUpdate(
   serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
 ): boolean {
-  return serverConfig?.environment.capabilities.desktopAppUpdate === true;
+  return (
+    supportsDestinationServerUpdate(serverConfig?.environment.updatePolicy, true) &&
+    serverConfig?.environment.capabilities.desktopAppUpdate === true
+  );
 }
 
 export function manualServerUpdateCommand(
   targetVersion: string,
   installation?: ServerInstallation,
-): string {
+  updatePolicy?: EnvironmentUpdatePolicy,
+): string | null {
+  if (!supportsDestinationServerUpdate(updatePolicy)) return null;
   if (installation?.kind === "npm-global") {
     const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
     return `npm install --global --prefix ${prefix} t3@${targetVersion}`;

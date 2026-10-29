@@ -1,3 +1,4 @@
+import { beforeEach, vi } from "vite-plus/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -16,8 +17,23 @@ import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
+import { pinnedRuntimePaths } from "./pinnedRuntime.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 import * as ServerSelfUpdate from "./selfUpdate.ts";
+
+const policy = vi.hoisted(() => ({
+  distribution: "txcode",
+  serverUpdate: "supported",
+  desktopUpdate: "supported",
+}));
+vi.mock("../forkUpdatePolicy.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../forkUpdatePolicy.ts")>()),
+  destinationUpdatePolicy: policy,
+}));
+beforeEach(() => {
+  policy.serverUpdate = "supported";
+  policy.desktopUpdate = "supported";
+});
 
 interface HarnessOptions {
   readonly mode?: "web" | "desktop";
@@ -33,6 +49,7 @@ const releaseHttpClient = (order: string[], beforeDownload?: Effect.Effect<void>
   HttpClient.make((request) =>
     Effect.gen(function* () {
       if (request.url.endsWith("/SHA256SUMS")) {
+        order.push("checksum");
         const digest = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", archiveBytes));
         const hex = Array.from(new Uint8Array(digest), (byte) =>
           byte.toString(16).padStart(2, "0"),
@@ -117,6 +134,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
       options.desktopAppUpdate ?? {
         available: false,
         run: () => Effect.die("unexpected desktop app update run"),
+        commit: () => Effect.die("unexpected desktop app update commit"),
       },
     ),
     Effect.provideService(HttpClient.HttpClient, releaseHttpClient(order, options.beforeDownload)),
@@ -124,10 +142,55 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
     Effect.provideService(HostProcess.Architecture, "x64"),
     Effect.provide(ServerConfig.layer({ ...config, mode: options.mode ?? "web" })),
   );
-  return { selfUpdate, order };
+  return { selfUpdate, order, baseDir };
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
+  it.effect(
+    "refuses fork updates before reusing a same-version upstream cache or handing off",
+    () =>
+      Effect.gen(function* () {
+        policy.serverUpdate = "manual";
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { selfUpdate, order, baseDir } = yield* makeHarness();
+        const cached = pinnedRuntimePaths(path, baseDir, "1.1.0", "linux");
+        yield* fs.makeDirectory(path.dirname(cached.entryPath), { recursive: true });
+        yield* fs.writeFileString(cached.entryPath, "upstream runtime");
+        yield* fs.writeFileString(cached.sentinelPath, "1.1.0\n");
+        const error = yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip);
+        expect(error.reason).toContain("installed manually");
+        expect(order).toEqual([]);
+        expect(yield* fs.readFileString(cached.entryPath)).toBe("upstream runtime");
+      }),
+  );
+
+  it.effect(
+    "refuses fork desktop handoff even when the injected desktop service supports updates",
+    () =>
+      Effect.gen(function* () {
+        policy.serverUpdate = "manual";
+        policy.desktopUpdate = "manual";
+        const { selfUpdate, order } = yield* makeHarness({
+          mode: "desktop",
+          desktopAppUpdate: {
+            available: true,
+            run: () => Effect.die("unexpected desktop preparation"),
+            commit: () => Effect.die("unexpected desktop commit"),
+          },
+        });
+        expect(
+          (yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason,
+        ).toContain("installed manually");
+        expect(
+          (yield* selfUpdate
+            .commitDesktopUpdate("old-token", () => Effect.die("unexpected handoff"))
+            .pipe(Effect.flip)).reason,
+        ).toContain("installed manually");
+        expect(order).toEqual([]);
+      }),
+  );
+
   // regression: #5181 make remote updates rollback-safe
   it.effect("rejects invalid versions and desktop-managed servers before staging", () =>
     Effect.gen(function* () {
@@ -220,7 +283,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
 
       yield* Deferred.succeed(releaseDownload, undefined);
       yield* Deferred.await(accepted);
-      expect(order).toEqual(["download", "extract", "preflight", "accept"]);
+      expect(order).toEqual(["checksum", "download", "extract", "preflight", "accept"]);
       expect((yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip)).reason).toBe(
         "A server update is already in progress.",
       );

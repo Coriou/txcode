@@ -236,6 +236,7 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
           <ServerUpdateAction
             environmentId={serverUpdateEnvironmentId}
             serverLabel={versionMismatchServerLabel}
+            updatePolicy={serverConfig?.environment.updatePolicy}
             selfUpdate={versionMismatchSelfUpdate}
             installation={versionMismatchInstallation}
             desktopAppUpdate={versionMismatchDesktopAppUpdate}

@@ -15,6 +15,7 @@ import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
+import { destinationUpdatePolicy, MANUAL_UPDATE_REASON } from "../forkUpdatePolicy.ts";
 import * as ServerConfig from "../config.ts";
 import * as DesktopTelemetryReceiver from "../resourceTelemetry/DesktopTelemetryReceiver.ts";
 
@@ -59,7 +60,10 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
   const receiver = yield* DesktopTelemetryReceiver.DesktopTelemetryReceiver;
   const inFlight = yield* Ref.make(false);
 
-  const available = config.mode === "desktop" && config.desktopTelemetryControlFd !== undefined;
+  const available =
+    destinationUpdatePolicy.desktopUpdate === "supported" &&
+    config.mode === "desktop" &&
+    config.desktopTelemetryControlFd !== undefined;
   const failWith = (reason: string, cause?: unknown) =>
     cause === undefined
       ? new ServerSelfUpdateError({ reason })
@@ -133,6 +137,9 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
 
   const run: DesktopAppUpdate["Service"]["run"] = Effect.fn("desktopUpdate.desktopAppUpdate.run")(
     function* (reportProgress) {
+      if (destinationUpdatePolicy.desktopUpdate === "manual") {
+        return yield* failWith(MANUAL_UPDATE_REASON);
+      }
       if (!available) {
         return yield* failWith(
           "This server was not started by the Tx Code desktop app, so it cannot drive a desktop update.",
@@ -177,6 +184,9 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
   const commit: DesktopAppUpdate["Service"]["commit"] = Effect.fn(
     "desktopUpdate.desktopAppUpdate.commit",
   )(function* (requestId, onHandoffAccepted = () => Effect.void) {
+    if (destinationUpdatePolicy.desktopUpdate === "manual") {
+      return yield* failWith(MANUAL_UPDATE_REASON);
+    }
     if (!available) {
       return yield* failWith("This server cannot commit a desktop app update.");
     }

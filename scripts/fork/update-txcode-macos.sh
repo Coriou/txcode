@@ -202,7 +202,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-get() { curl -fLsS --max-filesize 2147483648 -H 'User-Agent: Tx-Code-macOS-updater' "$1" -o "$2"; }
+get() { curl -fLsS --connect-timeout 15 --max-time 900 --max-filesize 2147483648 -H 'User-Agent: Tx-Code-macOS-updater' "$1" -o "$2"; }
 field() { plutil -extract "$2" raw -o - "$1"; }
 identity() {
   bundle=$1
@@ -286,8 +286,14 @@ manifest() {
   done
 }
 launch() {
+  printf 'Installed: %s\nBackup: %s\n' "$destination" "$backup"
   printf '%s\n' 'On the first launch of a build that contains migration 066, Tx Code rewrites some historical thread settlement timestamps in ~/.txcode from app versions 0.0.35 through 0.0.38. Putting the old app back does not undo that rewrite. Rollback restores the data backup taken before the swap. Official T3 profiles are not touched.'
-  if confirm "Launch $destination?"; then open "$destination"; else printf 'Not launched.\n'; fi
+  if confirm "Launch $destination?"; then
+    open "$destination" || fail "Launch request failed; the installed app and backup were kept. Try opening $destination manually."
+    printf 'Launch requested; application health has not been checked.\n'
+  else
+    printf 'Not launched.\n'
+  fi
 }
 undo_restore() {
   if [ -e "$data1" ] && [ -e "$backup/displaced/profile" ]; then mv "$data1" "$backup/bad-restore-profile"; fi

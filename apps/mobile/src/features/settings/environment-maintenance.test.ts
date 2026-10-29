@@ -55,6 +55,33 @@ describe("environment maintenance access", () => {
 });
 
 describe("environment release checks", () => {
+  const upstream = {
+    distribution: "t3",
+    serverUpdate: "supported",
+    desktopUpdate: "supported",
+  } as const;
+  it("does not discover upstream releases for manual or unknown destinations", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const signal = new AbortController().signal;
+    expect(await findEnvironmentUpdate("1.0.0", signal)).toBeNull();
+    expect(
+      await findEnvironmentUpdate("1.0.0", signal, {
+        distribution: "txcode",
+        serverUpdate: "manual",
+        desktopUpdate: "manual",
+      }),
+    ).toBeNull();
+    expect(
+      await findEnvironmentUpdate(
+        "1.0.0",
+        signal,
+        { distribution: "t3", serverUpdate: "supported", desktopUpdate: "manual" },
+        true,
+      ),
+    ).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
   const signal = new AbortController().signal;
   const feed = (...tags: ReadonlyArray<string>) =>
     new Response(
@@ -78,14 +105,14 @@ describe("environment release checks", () => {
           : new Response(null, { status: 403 }),
       ),
     );
-    expect(await findEnvironmentUpdate("1.0.0-nightly.20260923.1", signal)).toBe(
+    expect(await findEnvironmentUpdate("1.0.0-nightly.20260923.1", signal, upstream)).toBe(
       "1.0.0-nightly.20260924.2",
     );
-    expect(await findEnvironmentUpdate("1.0.0-nightly.20260924.2", signal)).toBeNull();
-    expect(await findEnvironmentUpdate("1.0.0-preview.20260923.1", signal)).toBe(
+    expect(await findEnvironmentUpdate("1.0.0-nightly.20260924.2", signal, upstream)).toBeNull();
+    expect(await findEnvironmentUpdate("1.0.0-preview.20260923.1", signal, upstream)).toBe(
       "1.0.0-preview.20260924.3",
     );
-    expect(await findEnvironmentUpdate("1.0.0-preview.20260925.1", signal)).toBeNull();
+    expect(await findEnvironmentUpdate("1.0.0-preview.20260925.1", signal, upstream)).toBeNull();
   });
 
   it("finds a published preview beyond the ten-entry feed and first API page", async () => {
@@ -106,7 +133,7 @@ describe("environment release checks", () => {
         throw new Error(`Unexpected release request: ${url}`);
       }),
     );
-    expect(await findEnvironmentUpdate("1.0.0-preview.20260923.1", signal)).toBe(
+    expect(await findEnvironmentUpdate("1.0.0-preview.20260923.1", signal, upstream)).toBe(
       "1.0.0-preview.20260924.3",
     );
   });
@@ -114,7 +141,9 @@ describe("environment release checks", () => {
   it("reports failed checks instead of claiming the server is current", async () => {
     for (const status of [403, 429]) {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status })));
-      await expect(findEnvironmentUpdate("1.0.0", signal)).rejects.toThrow(String(status));
+      await expect(findEnvironmentUpdate("1.0.0", signal, upstream)).rejects.toThrow(
+        String(status),
+      );
     }
     vi.stubGlobal(
       "fetch",
@@ -122,10 +151,10 @@ describe("environment release checks", () => {
         url.endsWith(".atom") ? feed("v1.0.0") : Response.json([{ tag_name: "v1.0.0" }]),
       ),
     );
-    await expect(findEnvironmentUpdate("1.0.0-nightly.20260923.1", signal)).rejects.toThrow(
-      "No nightly release",
-    );
+    await expect(
+      findEnvironmentUpdate("1.0.0-nightly.20260923.1", signal, upstream),
+    ).rejects.toThrow("No nightly release");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "invalid" })));
-    await expect(findEnvironmentUpdate("1.0.0", signal)).rejects.toThrow();
+    await expect(findEnvironmentUpdate("1.0.0", signal, upstream)).rejects.toThrow();
   });
 });

@@ -1,4 +1,33 @@
-# Updating T3 Code
+# Updating Tx Code
+
+## Tx Code updates are manual
+
+This fork currently supports manual updates only. **Settings → Environments**
+shows the installed server version and manual update guidance. Unsupported server
+updates are excluded from **Update everything**; provider updates remain available.
+Older environments whose distribution is unknown also need manual guidance from
+their maintainer. Protocol incompatibility notices still require updating the
+side named in the notice.
+
+For the macOS fork, use the [fork releases](https://github.com/Coriou/txcode/releases)
+and the [manual updater instructions](https://github.com/Coriou/txcode/blob/main/scripts/fork/update-txcode-macos.sh).
+Finish active work on the desktop and its remote clients, quit the app with
+Cmd+Q, then run your local copy of the updater from Terminal. Stop any separately
+running service through its normal service controls before replacing it. Follow
+the updater's backup, replacement, and launch confirmations. Keep the recorded
+backup for recovery; restoring data can discard work created after that backup.
+Installation completion and a healthy relaunch are separate outcomes.
+
+Do not use `t3 update`, `t3 service install`, or an upstream npm command to update
+this fork. An unchanged upstream client may still display its own npm commands;
+the fork rejects unsupported RPC updates, but cannot prevent someone from running
+an external command. Existing installations need a manual update to receive this
+guidance.
+
+## Supported upstream environments
+
+The server update actions below apply only when the destination explicitly
+identifies a supported upstream installation. They do not enable fork updates.
 
 The app you use and the server running your agents can be on different machines.
 When a server is behind your web or desktop app, the update button at the bottom

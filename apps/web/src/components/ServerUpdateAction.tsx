@@ -1,3 +1,7 @@
+import {
+  destinationManualUpdateInfo,
+  supportsDestinationServerUpdate,
+} from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import {
   AuthEnvironmentMaintainScope,
@@ -8,6 +12,7 @@ import type { AsyncResult } from "effect/reactivity";
 import { environmentSession } from "~/state/session";
 import type {
   EnvironmentId,
+  EnvironmentUpdatePolicy,
   ServerInstallation,
   ServerSelfUpdateCapability,
 } from "@t3tools/contracts";
@@ -49,6 +54,7 @@ export interface ServerUpdateTarget {
   readonly environmentId: EnvironmentId;
   readonly serverLabel: string;
   readonly selfUpdate: ServerSelfUpdateCapability | null;
+  readonly updatePolicy?: EnvironmentUpdatePolicy | undefined;
   readonly installation?: ServerInstallation | undefined;
   readonly desktopAppUpdate?: boolean;
   readonly targetVersion: string;
@@ -72,6 +78,7 @@ export function useServerUpdate() {
   ): Promise<ServerUpdateOutcome> => {
     const { environmentId, serverLabel, selfUpdate, targetVersion } = target;
     if (
+      !supportsDestinationServerUpdate(target.updatePolicy, selfUpdate === "desktop-managed") ||
       !canUpdateServer(appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId))) ||
       pendingUpdateEnvironmentIds.has(environmentId)
     )
@@ -122,6 +129,10 @@ export function ServerUpdatesAction({
   const [isPending, setIsPending] = useState(false);
   const eligible = targets.filter(
     (target) =>
+      supportsDestinationServerUpdate(
+        target.updatePolicy,
+        target.selfUpdate === "desktop-managed",
+      ) &&
       target.selfUpdate !== null &&
       (target.selfUpdate !== "desktop-managed" || target.desktopAppUpdate),
   );
@@ -196,6 +207,7 @@ export function ServerUpdateAction({
   serverLabel,
   selfUpdate,
   installation,
+  updatePolicy,
   desktopAppUpdate = false,
   targetVersion,
   label = "Update",
@@ -252,9 +264,27 @@ export function ServerUpdateAction({
       serverLabel,
       selfUpdate,
       desktopAppUpdate,
+      updatePolicy,
       targetVersion,
     });
   };
+
+  if (!supportsDestinationServerUpdate(updatePolicy, isDesktopAppUpdate)) {
+    const info = destinationManualUpdateInfo(updatePolicy);
+    return (
+      <span className="text-muted-foreground text-xs">
+        {info.message}
+        {info.url ? (
+          <>
+            {" "}
+            <a href={info.url} target="_blank" rel="noreferrer">
+              Releases
+            </a>
+          </>
+        ) : null}
+      </span>
+    );
+  }
 
   if (selfUpdate === "desktop-managed" && !desktopAppUpdate) {
     return (
@@ -265,7 +295,9 @@ export function ServerUpdateAction({
   }
 
   const manualCommand =
-    selfUpdate === null ? manualServerUpdateCommand(targetVersion, installation) : null;
+    selfUpdate === null
+      ? manualServerUpdateCommand(targetVersion, installation, updatePolicy)
+      : null;
   const actionLabel =
     manualCommand !== null
       ? installation?.kind === "npm-global"
@@ -312,7 +344,7 @@ export function ServerUpdateAction({
   );
 }
 
-/** Read the host descriptor's version because the host never delivers server config. */
+/** Requires policy-qualified serverUpdateRequired; the command rechecks the destination. */
 export function OutdatedServerUpdateAction({
   environmentId,
   serverLabel,

@@ -372,6 +372,7 @@ export function SavedBackendListRow({
         <ServerUpdateAction
           environmentId={environmentId}
           serverLabel={`${environment.label} server`}
+          updatePolicy={environment.serverConfig?.environment.updatePolicy}
           selfUpdate={resolveServerSelfUpdateCapability(environment.serverConfig)}
           installation={environment.serverConfig?.environment.capabilities.serverInstallation}
           desktopAppUpdate={supportsDesktopAppUpdate(environment.serverConfig)}
