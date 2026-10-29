@@ -89,13 +89,13 @@ export function CaptureShortcutConfig({
     onBusyChange?.(false);
   };
   const read = async (chooseFile = customFile, operation: "install" | "remove" = "install") => {
-    if (actionBusy || !bridge?.previewSnapShotConfig) return;
+    if (actionBusy || !bridge) return;
     begin("reading");
     setPreview(null);
     setResult(null);
     setCustomFile(chooseFile);
     const previewed = await settlePromise(() =>
-      bridge.previewSnapShotConfig!({
+      bridge.previewSnapShotConfig({
         operation,
         chooseFile,
         ...(keys?.trim() ? { shortcut: keys.trim() } : {}),
@@ -113,10 +113,10 @@ export function CaptureShortcutConfig({
     end();
   };
   const apply = async () => {
-    if (actionBusy || !preview || !bridge?.applySnapShotConfig) return;
+    if (actionBusy || !preview || !bridge) return;
     begin("writing");
     const saved = await settlePromise(async () => {
-      const applied = await bridge.applySnapShotConfig!(preview.id);
+      const applied = await bridge.applySnapShotConfig(preview.id);
       setResult(applied);
       await onSaved?.();
       if (!applied.warning && preview.operation === "install" && onComplete) {
