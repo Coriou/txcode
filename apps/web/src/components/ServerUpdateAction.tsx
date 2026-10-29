@@ -13,7 +13,6 @@ import { environmentSession } from "~/state/session";
 import type {
   EnvironmentId,
   EnvironmentUpdatePolicy,
-  ExecutionEnvironmentDescriptor,
   ServerInstallation,
   ServerSelfUpdateCapability,
 } from "@t3tools/contracts";
@@ -345,19 +344,17 @@ export function ServerUpdateAction({
   );
 }
 
-/** Read the host descriptor's version because the host never delivers server config. */
+/** Requires policy-qualified serverUpdateRequired; the command rechecks the destination. */
 export function OutdatedServerUpdateAction({
   environmentId,
   serverLabel,
   fromVersion,
-  descriptor,
   targetVersion,
   label = "Update",
 }: {
   readonly environmentId: EnvironmentId;
   readonly serverLabel: string;
   readonly fromVersion: string | undefined;
-  readonly descriptor?: ExecutionEnvironmentDescriptor | undefined;
   readonly targetVersion: string;
   readonly label?: string;
 }) {
@@ -386,27 +383,6 @@ export function OutdatedServerUpdateAction({
       description: `Reconnected on t3@${result.value.targetVersion}.`,
     });
   };
-  if (
-    !supportsDestinationServerUpdate(
-      descriptor?.updatePolicy,
-      descriptor?.capabilities.serverSelfUpdate === "desktop-managed",
-    )
-  ) {
-    const info = destinationManualUpdateInfo(descriptor?.updatePolicy);
-    return (
-      <span className="text-muted-foreground text-xs">
-        {info.message}
-        {info.url ? (
-          <>
-            {" "}
-            <a href={info.url} target="_blank" rel="noreferrer">
-              Releases
-            </a>
-          </>
-        ) : null}
-      </span>
-    );
-  }
   return (
     <Button size="xs" variant="outline" onClick={() => void handleUpdate()}>
       {label}

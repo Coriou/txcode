@@ -363,7 +363,6 @@ export function SavedBackendListRow({
         <OutdatedServerUpdateAction
           environmentId={environmentId}
           serverLabel={`${environment.label} server`}
-          descriptor={lastDescriptor}
           fromVersion={lastDescriptor?.serverVersion}
           targetVersion={APP_VERSION}
           label={serverUpdateState.status === "failed" ? "Retry update" : "Update"}
