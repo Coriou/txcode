@@ -15,7 +15,59 @@ Finish active work on the desktop and its remote clients, quit the app with
 Cmd+Q, then run your local copy of the updater from Terminal. Stop any separately
 running service through its normal service controls before replacing it. Follow
 the updater's backup, replacement, and launch confirmations. Keep the recorded
-backup for recovery; restoring data can discard work created after that backup.
+backup for recovery. Python 3 is required; the script checks for it before any
+release download and never installs prerequisites itself.
+
+New backups use version 2 application-state snapshots: userdata (including the
+SQLite databases, secrets, attachments, settings, themes and browser artifacts),
+desktop state, the previous app, and unknown profile content are preserved.
+Default worktrees and configured or database-referenced workspace locations stay
+in place at their exact current paths, including ignored files, dependencies,
+untracked files and uncommitted edits. The script does not recursively filter
+repositories. A workspace overlapping userdata is refused because it cannot be
+safely separated. Workspace intersections with desktop state, the Applications
+directory or the backup directory also stop the updater before replacement.
+Source profile symlinks are refused; managed workspace symlinks
+are left in place. The JSON scope manifest records preserved profile entries and
+workspace locations. Backups cannot recover workspaces deleted or damaged later.
+Restoring an older database may omit newer conversations while their files survive.
+
+Rollback first quarantines current application state. Version 2 restores replace
+only scoped state; they never replace the whole profile or reset Git worktrees.
+Missing workspace directories or checkpoint refs are reported, without recreation.
+Restored settings disable automatic worktree cleanup and continuation after server
+restart, including project overrides; the original settings remain in the snapshot
+and quarantine. Rollback stays stopped so workspace/history reconciliation can
+happen before reopening the app. Snapshots with enabled schedules or pending or
+running effect-outbox work are refused before replacing current state: choose a
+quiescent snapshot or obtain an offline recovery review. Disabling worktree cleanup
+does not disable scheduled tasks. Workspace inventory and unsafe-work checks read
+both `state.sqlite` and `statev2.sqlite`, including when the latter is empty.
+Unrecognized database schemas stop the operation for an offline recovery review.
+This updater cannot safely restore legacy full-profile snapshots automatically.
+It retains the selected snapshot and leaves current application state untouched.
+Manual recovery needs a separate scoped conversion that preserves current workspace
+files; this updater does not implement that conversion. This deliberate limitation
+avoids replacing current files with the snapshot’s older worktrees.
+
+Space checks reserve full scoped copies plus 20% and 1 GiB of headroom, without
+counting old backups toward available space. Rollback also reserves room for the
+selected state alongside quarantine. Checks are conservative across volumes and
+cannot reserve space against other applications. Keep all profile writers stopped:
+the app and launchd checks cannot prevent a separately started server from writing.
+SQLite's backup API includes committed WAL data and checks database integrity;
+other application files still require an offline copy.
+
+Only one updater may run at a time. After a forced termination, verify that no
+updater remains before removing the empty `.updater-lock` directory in the backup
+root. Failed copies remain incomplete and cannot be selected for rollback; they
+are never automatically deleted. An interrupted scoped rollback leaves a journal;
+the next run restores the original app, application state and desktop state as
+one recovery operation, then stops for inspection. The journal remains until all
+parts match, including when the original app was absent or had a different name.
+Interrupted copies and app bundles remain quarantined. Legacy full-profile
+snapshots are excluded from automatic retention; complete scoped snapshots are
+validated before pruning. Retention runs only after success.
 Installation completion and a healthy relaunch are separate outcomes.
 
 Do not use `t3 update`, `t3 service install`, or an upstream npm command to update
