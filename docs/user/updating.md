@@ -119,7 +119,7 @@ below.
 
 ## Switch between Stable and Nightly
 
-In the desktop app, change **Settings → About → Update track**. T3 Code shows each
+In the desktop app, change **Settings → About → Update track**. Tx Code shows each
 connected machine it will move and each one it skips, then moves them in one
 step. Remote servers install the latest release on the new track. Remote desktop
 apps reinstall on the new track. This app reinstalls last. Your threads,
@@ -130,7 +130,7 @@ older than its Nightly, run `t3 update --channel stable --allow-downgrade` on
 that machine.
 
 A switch is blocked for a machine whose database already has changes the
-target release does not support, or when T3 Code cannot confirm that it does.
+target release does not support, or when Tx Code cannot confirm that it does.
 The dialog says why: update a machine on its current track first when its
 release is too old to check, or wait until the target track includes the
 changes. A Mac running the desktop app must switch on that Mac.

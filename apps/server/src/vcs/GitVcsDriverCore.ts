@@ -2109,71 +2109,72 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }),
     );
     // diff-index does not read status output, so both spawn together; a non-repository discards it.
-    const [statusResult, numstatResult, defaultBranch, hasPrimaryRemote, headOid] = yield* Effect.all(
-      [
-        readStatus,
-        // Porcelain diff rewrites indexes despite GIT_OPTIONAL_LOCKS=0; plumbing with -M preserves rename detection.
-        executeGitWithStableDiagnostics(
-          "GitVcsDriver.statusDetails.numstat",
-          cwd,
-          ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"],
-          { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
-        ).pipe(
-          Effect.flatMap((result) => {
-            if (result.exitCode === 0) return Effect.succeed(parseReviewNumstat(result.stdout));
-            if (isUnbornHeadStderr(result.stderr)) {
-              return Effect.map(
-                Effect.all([
-                  runGitStdoutWithOptions(
-                    "GitVcsDriver.statusDetails.numstat.unborn",
+    const [statusResult, numstatResult, defaultBranch, hasPrimaryRemote, headOid] =
+      yield* Effect.all(
+        [
+          readStatus,
+          // Porcelain diff rewrites indexes despite GIT_OPTIONAL_LOCKS=0; plumbing with -M preserves rename detection.
+          executeGitWithStableDiagnostics(
+            "GitVcsDriver.statusDetails.numstat",
+            cwd,
+            ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"],
+            { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
+          ).pipe(
+            Effect.flatMap((result) => {
+              if (result.exitCode === 0) return Effect.succeed(parseReviewNumstat(result.stdout));
+              if (isUnbornHeadStderr(result.stderr)) {
+                return Effect.map(
+                  Effect.all([
+                    runGitStdoutWithOptions(
+                      "GitVcsDriver.statusDetails.numstat.unborn",
+                      cwd,
+                      ["diff-files", "--numstat", "-z"],
+                      { maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
+                    ),
+                    runGitStdoutWithOptions(
+                      "GitVcsDriver.statusDetails.numstat.unborn.staged",
+                      cwd,
+                      ["diff", "--cached", "--numstat", "-z"],
+                      { maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
+                    ),
+                  ]),
+                  ([unstagedStdout, stagedStdout]) => [
+                    ...parseReviewNumstat(stagedStdout),
+                    ...parseReviewNumstat(unstagedStdout),
+                  ],
+                );
+              }
+              return Effect.fail(
+                new GitCommandError({
+                  ...gitCommandContext({
+                    operation: "GitVcsDriver.statusDetails.numstat",
                     cwd,
-                    ["diff-files", "--numstat", "-z"],
-                    { maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
-                  ),
-                  runGitStdoutWithOptions(
-                    "GitVcsDriver.statusDetails.numstat.unborn.staged",
-                    cwd,
-                    ["diff", "--cached", "--numstat", "-z"],
-                    { maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
-                  ),
-                ]),
-                ([unstagedStdout, stagedStdout]) => [
-                  ...parseReviewNumstat(stagedStdout),
-                  ...parseReviewNumstat(unstagedStdout),
-                ],
-              );
-            }
-            return Effect.fail(
-              new GitCommandError({
-                ...gitCommandContext({
-                  operation: "GitVcsDriver.statusDetails.numstat",
-                  cwd,
-                  args: ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"],
+                    args: ["diff-index", "-M", "--numstat", "-z", "HEAD", "--"],
+                  }),
+                  detail: "git diff-index HEAD --numstat failed.",
+                  exitCode: result.exitCode,
+                  stdoutLength: result.stdout.length,
+                  stderrLength: result.stderr.length,
                 }),
-                detail: "git diff-index HEAD --numstat failed.",
-                exitCode: result.exitCode,
-                stdoutLength: result.stdout.length,
-                stderrLength: result.stderr.length,
-              }),
-            );
-          }),
-          Effect.result,
-        ),
-        statusCacheKey
-          ? Cache.get(defaultBranchCache, statusCacheKey).pipe(Effect.orElseSucceed(() => null))
-          : resolveDefaultBranchName(cwd, "origin").pipe(Effect.orElseSucceed(() => null)),
-        statusCacheKey
-          ? Cache.get(originExistsCache, statusCacheKey).pipe(Effect.orElseSucceed(() => false))
-          : originRemoteExists(cwd).pipe(Effect.orElseSucceed(() => false)),
-        // Best-effort HEAD oid for drift detection; omitted (undefined) when
-        // HEAD cannot be resolved so a failed lookup never fails the status.
-        runGitStdout("GitVcsDriver.statusDetails.headOid", cwd, ["rev-parse", "HEAD"]).pipe(
-          Effect.map((stdout) => stdout.trim()),
-          Effect.orElseSucceed(() => undefined),
-        ),
-      ],
-      { concurrency: "unbounded" },
-    );
+              );
+            }),
+            Effect.result,
+          ),
+          statusCacheKey
+            ? Cache.get(defaultBranchCache, statusCacheKey).pipe(Effect.orElseSucceed(() => null))
+            : resolveDefaultBranchName(cwd, "origin").pipe(Effect.orElseSucceed(() => null)),
+          statusCacheKey
+            ? Cache.get(originExistsCache, statusCacheKey).pipe(Effect.orElseSucceed(() => false))
+            : originRemoteExists(cwd).pipe(Effect.orElseSucceed(() => false)),
+          // Best-effort HEAD oid for drift detection; omitted (undefined) when
+          // HEAD cannot be resolved so a failed lookup never fails the status.
+          runGitStdout("GitVcsDriver.statusDetails.headOid", cwd, ["rev-parse", "HEAD"]).pipe(
+            Effect.map((stdout) => stdout.trim()),
+            Effect.orElseSucceed(() => undefined),
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
     if (statusResult === null) {
       return NON_REPOSITORY_STATUS_DETAILS;
     }

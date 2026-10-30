@@ -20,7 +20,7 @@ const PULL_REQUEST_NUMBER = /\(#(\d+)\)$/;
 const PULL_REQUEST_BODY_LIMIT = 300;
 const SUMMARY_MODEL = "gpt-6.1-terra";
 
-const SUMMARY_INSTRUCTIONS = `You write release notes for T3 Code, a GUI for coding agents (web and desktop apps backed by a server; providers like Codex, Claude, Cursor, OpenCode).
+const SUMMARY_INSTRUCTIONS = `You write release notes for Tx Code, a GUI for coding agents (web and desktop apps backed by a server; providers like Codex, Claude, Cursor, OpenCode).
 
 These notes cover the web app, desktop app, and server only. The mobile app has its own release notes, so leave out anything only about mobile, iOS, or Android.
 
@@ -49,7 +49,7 @@ How to write:
 Examples of the tone:
 - Bad: "Cmd+K now finds the right thread first, and it searches message text too." Good: "Much better Cmd+K search."
 - Bad: "You can share a thread with a guest who watches it live and sends messages that you approve." Good: "Share threads with guests, safely."
-- Bad: "Triage issues from the command palette." Good: "Fix and debug T3 Code itself with a new 'triage' command."
+- Bad: "Triage issues from the command palette." Good: "Fix and debug Tx Code itself with a new 'triage' command."
 - Bad: "Settings and Usage open as large modals over your thread." Good: leave it out.
 - Bad: "Cmd/Ctrl+W closes tabs safely (#25860)" Good: "Cmd/Ctrl+W no longer closes the whole window (#25860)"`;
 

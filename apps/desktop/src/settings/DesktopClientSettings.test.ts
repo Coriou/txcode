@@ -74,7 +74,6 @@ const clientSettings: ClientSettings = {
   boringSidebarMultilineRows: false,
   threadDetailsUsageEnabled: false,
   threadDetailsItems: {},
-  legacySidebarEnabled: false,
   sidebarWorkingShelfEnabled: false,
   pullRequestMergeMethodOverrides: {},
   timestampFormat: "24-hour",

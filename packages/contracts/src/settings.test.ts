@@ -354,7 +354,6 @@ describe("provider enabled defaults", () => {
     });
   });
 
-
   it("enables only the stable bindings by default", () => {
     const enabledByDefault = (driver: string) =>
       resolveProviderInstanceEnabled({ driver: ProviderDriverKind.make(driver), config: {} });
@@ -524,7 +523,6 @@ describe("server model preferences", () => {
     expect(decodeServerSettingsPatch(input)).toEqual(input);
   });
 });
-
 
 // Fork-local regression: V1's separate observer ignored the encoded upstream Off.
 describe("notification preference consolidation", () => {

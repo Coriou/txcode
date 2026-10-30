@@ -144,7 +144,9 @@ function publish(staging, dir) {
 
 async function main() {
   const key = `${process.platform}-${process.arch}`;
-  if (!SUPPORTED.includes(key)) {
+  // A custom release base can host an arch the default feed does not publish.
+  const customReleaseBase = (process.env.T3CODE_RELEASE_BASE_URL || "").trim() !== "";
+  if (!customReleaseBase && !SUPPORTED.includes(key)) {
     throw new Error(
       `no Tx Code CLI build is available for ${key} (supported: ${SUPPORTED.join(", ")}).\n` +
         "The desktop app is at https://github.com/pingdotgg/t3code/releases",
