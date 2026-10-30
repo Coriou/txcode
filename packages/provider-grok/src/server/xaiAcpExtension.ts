@@ -505,17 +505,44 @@ export function xAiSubagentFinishedNotice(
   };
 }
 
+// Tx fork: Grok >=1.0.70 sends task lifecycle via _x.ai/session/update; drop when upstream handles it.
+const XAiSessionUpdateWithTaskNotification = Schema.Struct({
+  ...XAiSessionUpdateNotification.fields,
+  update: Schema.Struct({
+    ...XAiSessionUpdateNotification.fields.update.fields,
+    ...XAiTaskLifecycleNotification.fields.update.fields,
+  }),
+});
+
+const xAiSessionUpdateTaskStatus = (sessionUpdate: string) =>
+  sessionUpdate === "task_backgrounded"
+    ? "running"
+    : sessionUpdate === "task_completed"
+      ? "completed"
+      : undefined;
+
+// Session-update methods keep one handler each, so task lifecycle shares this registration.
 export const registerXAiSubagentFinished = (
   runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "handleExtNotification">,
   finish: (notice: XAiSubagentFinishedNotice) => Effect.Effect<void>,
+  applyBackgroundTask: (mutation: XAiBackgroundTaskLifecycleMutation) => Effect.Effect<void>,
 ): Effect.Effect<void> =>
   Effect.forEach(
     xAiSessionNotificationMethods,
     (method) =>
-      runtime.handleExtNotification(method, XAiSessionUpdateNotification, (notification) => {
-        const notice = xAiSubagentFinishedNotice(notification);
-        return notice === null ? Effect.void : finish(notice);
-      }),
+      runtime.handleExtNotification(
+        method,
+        XAiSessionUpdateWithTaskNotification,
+        (notification) => {
+          const taskStatus = xAiSessionUpdateTaskStatus(notification.update.sessionUpdate);
+          if (taskStatus !== undefined) {
+            const mutation = xAiBackgroundTaskLifecycleMutation(notification, taskStatus);
+            return mutation === null ? Effect.void : applyBackgroundTask(mutation);
+          }
+          const notice = xAiSubagentFinishedNotice(notification);
+          return notice === null ? Effect.void : finish(notice);
+        },
+      ),
     { discard: true },
   );
 

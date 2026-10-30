@@ -142,7 +142,9 @@ const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensi
   lastProposedPlanMarkdown,
 }) =>
   registerXAiBackgroundTaskTracking(runtime, applyBackgroundTaskMutation).pipe(
-    Effect.andThen(registerXAiSubagentFinished(runtime, finishSubagent)),
+    Effect.andThen(
+      registerXAiSubagentFinished(runtime, finishSubagent, applyBackgroundTaskMutation),
+    ),
     Effect.andThen(registerGrokAskUserQuestionExtensions({ runtime, requestUserInput })),
     Effect.andThen(
       registerGrokExitPlanModeExtensions({

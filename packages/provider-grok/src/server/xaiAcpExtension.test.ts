@@ -22,10 +22,14 @@ import {
   makeXAiAskUserQuestionResponse,
   makeXAiPromptCompletionRuntime,
   normalizeXAiAcpToolCallState,
+  registerXAiBackgroundTaskTracking,
+  registerXAiSubagentFinished,
   xAiBackgroundTaskLifecycleMutation,
   xAiPromptCompleteFromSessionUpdate,
   xAiSubagentFinishedNotice,
   XAiAskUserQuestionRequest,
+  type XAiBackgroundTaskLifecycleMutation,
+  type XAiSubagentFinishedNotice,
 } from "./xaiAcpExtension.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
@@ -1325,6 +1329,95 @@ describe("XAiAcpExtension", () => {
       const response = yield* Fiber.join(promptFiber);
       expect(response.stopReason).toBe("end_turn");
       expect(handlers.has("_x.ai/session/update")).toBe(true);
+    }),
+  );
+
+  // Tx fork: Grok 1.0.70 sends task lifecycle only on _x.ai/session/update.
+  it.effect("tracks background tasks and subagents from the shared _x.ai/session/update", () =>
+    Effect.gen(function* () {
+      const handlers = new Map<string, (notification: unknown) => Effect.Effect<void>>();
+      const baseRuntime = {
+        handleExtNotification: (
+          method: string,
+          _schema: unknown,
+          handler: (notification: unknown) => Effect.Effect<void>,
+        ) => {
+          handlers.set(method, handler);
+          return Effect.void;
+        },
+      } as unknown as AcpSessionRuntime.AcpSessionRuntime["Service"];
+      const runtime = yield* makeXAiPromptCompletionRuntime(baseRuntime);
+      const mutations: Array<XAiBackgroundTaskLifecycleMutation> = [];
+      const notices: Array<XAiSubagentFinishedNotice> = [];
+      const apply = (mutation: XAiBackgroundTaskLifecycleMutation) =>
+        Effect.sync(() => mutations.push(mutation));
+      yield* registerXAiBackgroundTaskTracking(runtime, apply);
+      yield* registerXAiSubagentFinished(
+        runtime,
+        (notice) => Effect.sync(() => notices.push(notice)),
+        apply,
+      );
+
+      const sessionUpdate = handlers.get("_x.ai/session/update")!;
+      yield* sessionUpdate({
+        sessionId: "root-session",
+        update: {
+          sessionUpdate: "task_backgrounded",
+          tool_call_id: "call-3f6a4fbf-924e-4cda-b71e-e4e649bc3b47-70",
+          task_id: "7e67fe55-cedf-4dd6-b1e8-3416a5f005cd",
+          command: "vp run check:changed",
+          cwd: "/workspace",
+          output_file: "/workspace/.grok/terminal/call.log",
+          description: "Run changed checks",
+        },
+      });
+      yield* sessionUpdate({
+        sessionId: "root-session",
+        update: {
+          sessionUpdate: "task_completed",
+          task_snapshot: {
+            task_id: "7e67fe55-cedf-4dd6-b1e8-3416a5f005cd",
+            cwd: "/workspace",
+            start_time: { secs_since_epoch: 1793329161, nanos_since_epoch: 413166000 },
+            output: "CHECK_DONE exit 0\n",
+            truncated: false,
+            exit_code: 0,
+          },
+          will_wake: true,
+        },
+      });
+      yield* sessionUpdate({
+        sessionId: "root-session",
+        update: {
+          sessionUpdate: "subagent_finished",
+          child_session_id: "child-session",
+          status: "completed",
+          output: "SUBAGENT_DONE",
+        },
+      });
+
+      expect(mutations).toEqual([
+        {
+          sessionId: "root-session",
+          taskId: "7e67fe55-cedf-4dd6-b1e8-3416a5f005cd",
+          status: "running",
+          report: { kind: "command", label: "Run changed checks" },
+        },
+        {
+          sessionId: "root-session",
+          taskId: "7e67fe55-cedf-4dd6-b1e8-3416a5f005cd",
+          status: "completed",
+          output: "CHECK_DONE exit 0\n",
+        },
+      ]);
+      expect(notices).toEqual([
+        {
+          sessionId: "root-session",
+          childSessionId: "child-session",
+          status: "completed",
+          result: "SUBAGENT_DONE",
+        },
+      ]);
     }),
   );
 
