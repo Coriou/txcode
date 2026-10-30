@@ -1,854 +1,701 @@
-#!/bin/sh
-# Fork-only. Updates the installed Tx Code macOS app from Coriou/txcode prereleases.
-# This is not scripts/install.sh and it does not install official T3 Code.
-set -eu
+#!/bin/bash
+# Fork-only (Tx Code): updates the installed Tx Code macOS app from Coriou/txcode nightly
+# prereleases. It is not scripts/install.sh and never installs official T3 Code.
+set -euo pipefail
 
-help() {
+usage() {
   cat <<'HELP'
-Usage: update-txcode-macos.sh [update|rollback]
-       update-txcode-macos.sh --help
+Usage: update-txcode-macos.sh [command] [options]
 
-Run in a terminal on macOS. Quit Tx Code with Cmd+Q first: closing the window
-leaves the bundled server up. Downloads the newest Coriou/txcode nightly for
-this machine, verifies its checksum and identity, and asks before download,
-backup/swap, and launch. Every answer defaults to abort; only y or yes accepts.
-The downloaded disk image is deleted when the script exits, including after an
-abort or a failed check. A copy that was already staged is kept.
-Backups live in ~/Library/Application Support/txcode-desktop-backups.
-The newest complete scoped snapshot is kept; legacy and incomplete backups are retained.
-Version 2 backups contain application state and the previous app. Workspace files
-stay at their current paths and are not backed up or rolled back. Python 3 is
-required. Rollback quarantines current state first and stays stopped for review.
-Legacy full-profile snapshots cannot be restored automatically by this updater.
-Manual recovery needs a separate scoped conversion. An interrupted swap renames the previous
-app to Tx Code.app.aside (or the Nightly name). The next run puts that aside back
-if the new app is missing, and deletes nothing if both are still present.
-No unattended mode, repository override, or safety-check override is supported.
+Installs the newest Tx Code nightly for this Mac after backing up your app data.
+
+Commands:
+  update          Default. Download, verify, quit Tx Code, back up, install, reopen.
+  status          Show the installed and latest versions and the backups on disk.
+  rollback [ID]   Restore an earlier app and its data. Current state is backed up first.
+  prune-legacy    Delete backups made by older versions of this script (asks first).
+
+Options:
+  -y, --yes       Answer yes to every question.
+  -n, --dry-run   Show what would happen without changing anything.
+  --version TAG   Install this release tag instead of the newest nightly.
+  --force         Reinstall even when already up to date.
+  -h, --help      Show this help.
+
+Backups live in ~/Library/Application Support/txcode-desktop-backups; the newest 3
+are kept. They hold databases, settings, secrets, attachments, desktop storage and
+the previous app. Worktrees, logs and caches are never copied or changed.
+
+Exit codes: 0 done or up to date, 1 error, 2 usage, 3 cancelled, 4 Tx Code still
+running, 5 download or checksum failed, 6 safety check failed, 7 not enough space.
 HELP
 }
-fail() { printf 'Tx Code updater: %s\n' "$*" >&2; exit 1; }
-confirm() {
-  printf '%s [y/yes to continue]: ' "$*"
-  IFS= read -r answer || return 1
-  case "$answer" in y|yes) return 0 ;; *) return 1 ;; esac
+
+readonly bundle_id=net.coriou.txcode
+readonly backup_format=txcode-backup-v3
+readonly keep_backups=3
+readonly E_FAIL=1 E_USAGE=2 E_CANCEL=3 E_RUNNING=4 E_NETWORK=5 E_SAFETY=6 E_SPACE=7
+# What first-launch migrations can change. Worktrees, logs, caches and browser artifacts are excluded.
+readonly databases=(statev2.sqlite state.sqlite)
+readonly userdata_entries=(settings.json client-settings.json desktop-settings.json
+  connection-catalog.json saved-environments.json environment-id keybindings.json
+  keybindings-migrations secrets themes attachments)
+# Electron storage the web client migrates: IndexedDB caches and localStorage drafts.
+readonly desktop_entries=("Local Storage" IndexedDB WebStorage "Local State" Preferences Cookies)
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+  c_bold=$'\033[1m' c_red=$'\033[31m' c_green=$'\033[32m' c_yellow=$'\033[33m' c_off=$'\033[0m'
+else
+  c_bold='' c_red='' c_green='' c_yellow='' c_off=''
+fi
+step() { printf '%s==>%s %s\n' "$c_bold" "$c_off" "$*"; }
+info() { printf '    %s\n' "$*"; }
+row() { printf '  %-10s %s\n' "$1" "$2"; }
+success() { printf '%s%s%s\n' "$c_green" "$*" "$c_off"; }
+warn() { printf '%swarning:%s %s\n' "$c_yellow" "$c_off" "$*" >&2; }
+die() {
+  local code=$1
+  shift
+  printf '%serror:%s %s\n' "$c_red" "$c_off" "$*" >&2
+  exit "$code"
 }
-case "$#:${1:-}" in
-  0:) command=update ;;
-  1:update|1:rollback) command=$1 ;;
-  1:--help) help; exit 0 ;;
-  *) help; exit 1 ;;
-esac
-[ -t 0 ] || fail 'A terminal on stdin is required; pipes are refused.'
-[ "$(uname -s)" = Darwin ] || fail 'macOS is required.'
+
+command=update yes=0 dry_run=0 force=0 want_tag='' rollback_id='' command_given=0
+is_id() { [[ $1 =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; }
+while [ $# -gt 0 ]; do
+  case $1 in
+    update | status | rollback | prune-legacy)
+      [ "$command_given" = 0 ] || die $E_USAGE "Only one command is allowed. See --help."
+      command=$1 command_given=1
+      ;;
+    -y | --yes) yes=1 ;;
+    -n | --dry-run) dry_run=1 ;;
+    --force) force=1 ;;
+    --version)
+      [ $# -ge 2 ] || die $E_USAGE '--version needs a release tag, for example v0.1.6-nightly.20261030.3919.'
+      want_tag=$2
+      shift
+      ;;
+    --version=*) want_tag=${1#*=} ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [ "$command" = rollback ] && [ -z "$rollback_id" ] && is_id "$1"; then
+        rollback_id=$1
+      else
+        die $E_USAGE "Unknown argument: $1. See --help."
+      fi
+      ;;
+  esac
+  shift
+done
+if [ -n "$want_tag" ] && ! [[ $want_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  die $E_USAGE "Not a release tag: $want_tag"
+fi
+
+[ "$(uname -s)" = Darwin ] || die $E_FAIL 'This updater runs on macOS only.'
 case "$(uname -m)" in
-  x86_64) arch=x64; machine=x86_64 ;;
-  arm64) arch=arm64; machine=arm64 ;;
-  *) fail 'Unsupported machine architecture.' ;;
+  x86_64) arch=x64 machine=x86_64 ;;
+  arm64) arch=arm64 machine=arm64 ;;
+  *) die $E_FAIL 'Unsupported Mac architecture.' ;;
 esac
+
 api=https://api.github.com/repos/Coriou/txcode
 web=https://github.com/Coriou/txcode
 apps=/Applications
 root="$HOME/Library/Application Support/txcode-desktop-backups"
 data1="$HOME/.txcode"
 data2="$HOME/Library/Application Support/txcode-v2"
-snap_bid=none
-snap_version=none
-snap_commit=none
-process_file=
+process_file='' clone_override='' quit_timeout=30
 if [ "${TXCODE_UPDATE_FIXTURE:-}" = 1 ]; then
   sandbox=${TXCODE_UPDATE_FIXTURE_ROOT:?Fixture root required}
-  [ -d "$sandbox" ] && [ ! -L "$sandbox" ] || fail 'Invalid fixture root.'
+  [ -d "$sandbox" ] && [ ! -L "$sandbox" ] || die $E_FAIL 'Invalid fixture root.'
   sandbox=$(cd "$sandbox" && pwd -P)
-  case "$sandbox" in /private/tmp/*|/tmp/*|/var/folders/*|/private/var/folders/*) ;; *) fail 'Fixture root must be temporary.' ;; esac
+  case "$sandbox" in /private/tmp/* | /tmp/* | /var/folders/* | /private/var/folders/*) ;; *) die $E_FAIL 'Fixture root must be temporary.' ;; esac
   apps=${TXCODE_UPDATE_APPS:?Fixture apps required}
   root=${TXCODE_UPDATE_BACKUPS:?Fixture backups required}
   process_file=${TXCODE_UPDATE_PS:?Fixture process listing required}
   data1="$sandbox/home/.txcode"
   data2="$sandbox/home/Library/Application Support/txcode-v2"
   for path in "$apps" "$root" "$process_file" "$data1" "$data2"; do
-    case "$path" in "$sandbox"/*) ;; *) fail 'Unsafe fixture path.' ;; esac
-    [ ! -L "$path" ] || fail 'Fixture symlink refused.'
-    parent=$(dirname "$path")
-    while [ ! -d "$parent" ]; do parent=$(dirname "$parent"); done
-    case "$(cd "$parent" && pwd -P)/" in "$sandbox"/*) ;; *) fail 'Fixture path escapes root.' ;; esac
+    case "$path" in "$sandbox"/*) ;; *) die $E_FAIL 'Unsafe fixture path.' ;; esac
+    [ ! -L "$path" ] || die $E_FAIL 'Fixture symlink refused.'
   done
   api=${TXCODE_UPDATE_API:-$api}
+  clone_override=${TXCODE_UPDATE_CLONE:-}
+  quit_timeout=${TXCODE_UPDATE_QUIT_TIMEOUT:-$quit_timeout}
 fi
-command -v python3 >/dev/null 2>&1 || fail 'Python 3 is required for safe application-state backups. Install Python 3, then run this script again. Nothing has been downloaded or changed.'
-state() {
-  TXCODE_STATE_APPS="$apps" TXCODE_STATE_BACKUPS="$root" python3 - "$@" <<'TXCODE_STATE_PY'
-import json, os, pathlib, sqlite3, stat, subprocess, sys, time
-from urllib.parse import quote
 
-# Fork-only application-state snapshots; repository files are never restored.
-def die(message):
-    raise RuntimeError(message)
+mutating=0
+if [ "$dry_run" = 0 ] && [ "$command" != status ]; then mutating=1; fi
+if [ "$mutating" = 1 ] && [ "$yes" = 0 ] && [ ! -t 0 ]; then
+  die $E_USAGE 'No terminal to ask questions on. Run this in Terminal, or pass --yes.'
+fi
 
-def load(path):
-    if not path.exists(): return {}
-    if path.is_symlink(): die('Settings symlink refused: ' + str(path))
-    value = json.loads(path.read_text())
-    if not isinstance(value, dict): die('Settings must be a JSON object: ' + str(path))
-    return value
-
-def write(path, value):
-    temporary = path.with_name(path.name + '.writing')
-    with temporary.open('x') as f:
-        json.dump(value, f, indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
-    temporary.replace(path)
-    descriptor = os.open(path.parent, os.O_RDONLY)
-    try: os.fsync(descriptor)
-    finally: os.close(descriptor)
-
-def inside(path, parent):
-    return path == parent or parent in path.parents
-
-def guard_mutable_roots(paths, profile):
-    roots = [profile.parent / 'Library/Application Support/txcode-v2', pathlib.Path(os.environ.get('TXCODE_STATE_APPS', '/Applications'))]
-    if os.environ.get('TXCODE_STATE_BACKUPS'): roots.append(pathlib.Path(os.environ['TXCODE_STATE_BACKUPS']))
-    for value in paths:
-        workspace = pathlib.Path(value).resolve()
-        for root in roots:
-            target = root.resolve()
-            if inside(workspace, target) or inside(target, workspace):
-                die('Workspace overlaps updater-managed path: ' + str(root) + '. Keep current files in place and obtain a scoped recovery review; no automatic replacement is safe.')
-
-def application_databases(profile):
-    # V2 imports state.sqlite when missing; older installed apps still use it directly.
-    for name in ('state.sqlite', 'statev2.sqlite'):
-        db = profile / 'userdata' / name
-        if db.is_symlink(): die('Database symlink refused: ' + str(db))
-        if not db.exists(): continue
-        with sqlite3.connect('file:' + quote(str(db)) + '?mode=ro', uri=True) as connection:
-            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
-            if tables and 'projection_projects' not in tables:
-                die('Unsupported application database schema: ' + str(db) + '. Obtain an offline recovery review before proceeding.')
-            yield connection, tables
-
-def inventory(profile, logical_profile=None):
-    logical_profile = logical_profile or profile
-    if profile.is_symlink(): die('Profile symlink refused')
-    if (profile / 'userdata').is_symlink(): die('Userdata symlink refused')
-    settings = load(profile / 'userdata/settings.json')
-    roots = [str(logical_profile / 'worktrees')]
-    roots += [settings.get('worktreesDirectory', '')] + settings.get('previousWorktreesDirectories', [])
-    paths = set()
-    for value in roots:
-        if not isinstance(value, str): die('Invalid workspace directory setting')
-        if value:
-            value = value.replace('~/', str(logical_profile.parent) + '/', 1) if value.startswith('~/') else value
-            p = pathlib.Path(value)
-            if p.is_absolute(): paths.add(str(p))
-    for connection, tables in application_databases(profile):
-        if 'projection_projects' in tables:
-            paths.update(row[0] for row in connection.execute('SELECT workspace_root FROM projection_projects') if row[0])
-        if 'orchestration_v2_projection_threads' in tables:
-            for row in connection.execute('SELECT payload_json FROM orchestration_v2_projection_threads'):
-                value = json.loads(row[0]).get('worktreePath')
-                if value: paths.add(value)
-        if 'projection_threads' in tables:
-            paths.update(row[0] for row in connection.execute('SELECT worktree_path FROM projection_threads') if row[0])
-    if any(not isinstance(p, str) or not pathlib.Path(p).is_absolute() for p in paths):
-        die('Unsupported workspace location in application database')
-    guard_mutable_roots(paths, logical_profile)
-    return sorted(paths)
-
-def entries(profile, paths):
-    if profile.is_symlink(): die('Profile symlink refused')
-    result = []
-    for child in sorted(profile.iterdir()) if profile.exists() else []:
-        if '\n' in child.name or '\t' in child.name: die('Unsupported newline or tab in profile entry')
-        real = child.resolve()
-        overlaps = any(inside(pathlib.Path(p).resolve(), real) or inside(real, pathlib.Path(p).resolve()) for p in paths)
-        if overlaps:
-            if child.name == 'userdata': die('Workspace overlaps application userdata; cannot safely snapshot')
-            print('Workspace retained in place: ' + str(child), file=sys.stderr)
-            continue
-        result.append(child.name)
-    return result
-
-def copy(source, destination):
-    if source.is_symlink():
-        destination.symlink_to(os.readlink(source))
-        return
-    subprocess.run(['ditto', str(source), str(destination)], check=True)
-
-def databases(profile):
-    for directory, dirs, files in os.walk(profile, followlinks=False):
-        for name in files:
-            source = pathlib.Path(directory) / name
-            if source.is_symlink(): continue
-            if not stat.S_ISREG(source.stat().st_mode): die('Non-regular userdata file refused: ' + str(source))
-            with source.open('rb') as f: header = f.read(16)
-            if header == b'SQLite format 3\x00': yield source
-
-def snapshot(profile, target):
-    paths = inventory(profile)
-    names = entries(profile, paths)
-    target.mkdir()
-    for name in names: copy(profile / name, target / name)
-    # SQLite's backup API includes committed WAL data in one consistent database.
-    for source in databases(profile / 'userdata'):
-        relative = source.relative_to(profile)
-        saved = target / relative
-        for suffix in ['', '-wal', '-shm', '-journal']:
-            path = pathlib.Path(str(saved) + suffix)
-            if path.exists(): path.unlink()
-        with sqlite3.connect('file:' + quote(str(source)) + '?mode=ro', uri=True) as original:
-            with sqlite3.connect(saved) as backup:
-                deadline = time.monotonic() + 30
-                def progress(status, remaining, total):
-                    if time.monotonic() > deadline: die('SQLite snapshot timed out; keep all profile writers stopped')
-                original.backup(backup, pages=256, progress=progress)
-                if backup.execute('PRAGMA quick_check').fetchall() != [('ok',)]: die('SQLite integrity check failed')
-    return {'version': 2, 'scope': 'application-state; workspaces retained in place', 'entries': names, 'workspaces': paths}
-
-def validate(snapshot_dir, profile):
-    info = load(snapshot_dir / 'APPLICATION-STATE.json')
-    if info.get('version') != 2 or not isinstance(info.get('entries'), list) or not isinstance(info.get('workspaces'), list): die('Invalid application-state manifest')
-    if {p.name for p in (snapshot_dir / 'profile').iterdir()} != set(info['entries']): die('Snapshot profile contents do not match scope manifest')
-    expected = set(inventory(snapshot_dir / 'profile', profile))
-    if not expected.issubset(set(info['workspaces'])): die('Workspace references missing from manifest')
-    guard_mutable_roots(info['workspaces'], profile)
-    if len(info['entries']) != len(set(info['entries'])): die('Duplicate state entry')
-    for workspace in info['workspaces']:
-        if not isinstance(workspace, str) or not pathlib.Path(workspace).is_absolute(): die('Invalid workspace reference')
-    for name in info['entries']:
-        if not isinstance(name, str) or pathlib.Path(name).name != name or name in ('.', '..', 'worktrees'): die('Invalid state entry')
-        p = snapshot_dir / 'profile' / name
-        if not p.exists() and not p.is_symlink(): die('Missing state entry: ' + name)
-        for workspace in info['workspaces']:
-            if not isinstance(workspace, str) or not pathlib.Path(workspace).is_absolute(): die('Invalid workspace reference')
-            if inside(pathlib.Path(workspace).resolve(), (profile / name).resolve()): die('State entry overlaps workspace')
-    for db in databases(snapshot_dir / 'profile/userdata'):
-        with sqlite3.connect('file:' + quote(str(db)) + '?mode=ro', uri=True) as connection:
-            if connection.execute('PRAGMA quick_check').fetchall() != [('ok',)]: die('Snapshot SQLite integrity check failed')
-    return info
-
-def safe_to_restore(profile):
-    for connection, tables in application_databases(profile):
-        checks = [('scheduled_tasks', "enabled != 0"), ('orchestration_v2_effect_outbox', "status IN ('pending', 'running')")]
-        for table, predicate in checks:
-            if table in tables and connection.execute('SELECT 1 FROM ' + table + ' WHERE ' + predicate + ' LIMIT 1').fetchone():
-                die('Snapshot contains enabled schedules or pending effects. Automatic rollback is blocked before changing current state. Choose a quiescent snapshot or obtain an offline recovery review; do not launch this snapshot against current workspaces.')
-
-def disable_cleanup(profile):
-    path = profile / 'userdata/settings.json'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    settings = load(path)
-    settings['continueThreadsAfterServerUpdate'] = False
-    settings['worktreeCleanup'] = {'mode': 'off'}
-    settings.update(worktreeAfterDays=None, worktreeSettledAfterDays=None, worktreeOnMerge=False, worktreeOnDelete=False, worktreeUnchanged=False)
-    overrides = settings.get('projectSettingsOverrides', {})
-    if not isinstance(overrides, dict): die('Invalid project settings overrides')
-    for override in overrides.values():
-        if not isinstance(override, dict): die('Invalid project settings override')
-        override['continueThreadsAfterServerUpdate'] = False
-        override['worktreeCleanup'] = {'mode': 'off'}
-    settings['projectSettingsOverrides'] = overrides
-    write(path, settings)
-
-def report(info):
-    for value in info['workspaces']:
-        path = pathlib.Path(value)
-        if not path.is_dir(): print('WARNING: missing workspace (not recreated): ' + value)
-        else:
-            result = subprocess.run(['git', '-C', value, 'for-each-ref', '--format=%(refname)', 'refs/t3/orchestration-v2/checkpoints'], capture_output=True, text=True)
-            if result.returncode or not result.stdout.strip(): print('WARNING: no checkpoint refs available: ' + value)
-
-try:
-    operation, profile_arg, backup_arg = sys.argv[1:4]
-    profile, backup = pathlib.Path(profile_arg), pathlib.Path(backup_arg)
-    if operation == 'plan':
-        for name in entries(profile, inventory(profile)): print(str(profile / name))
-    elif operation == 'snapshot':
-        write(backup / 'APPLICATION-STATE.json', snapshot(profile, backup / 'profile'))
-    elif operation == 'verify': validate(backup, profile)
-    elif operation == 'validate':
-        report(validate(backup, profile))
-        safe_to_restore(backup / 'profile')
-    elif operation == 'check-work': safe_to_restore(backup / 'profile')
-    elif operation == 'stage':
-        info = validate(backup, profile)
-        safe_to_restore(backup / 'profile')
-        stage = pathlib.Path(sys.argv[4]) / 'restore-stage'
-        copy(backup / 'profile', stage)
-        disable_cleanup(stage)
-        print('Automatic worktree cleanup is disabled after rollback. Reconcile surviving workspaces before enabling it again.')
-    elif operation == 'restore':
-        selected = pathlib.Path(sys.argv[4])
-        info = validate(selected, profile)
-        stage = backup / 'restore-stage'
-        names = sorted(set(info['entries']) | set(entries(profile, inventory(profile) + info['workspaces'])))
-        # Neither old metadata nor current metadata may authorize moving a workspace.
-        protected = inventory(profile) + info['workspaces']
-        for name in names:
-            if any(inside(pathlib.Path(p).resolve(), (profile / name).resolve()) or inside((profile / name).resolve(), pathlib.Path(p).resolve()) for p in protected):
-                die('Restore entry overlaps surviving workspace: ' + name)
-        journal = backup.parent / '.restore-journal.json'
-        displaced = backup / 'displaced-profile'
-        displaced.mkdir()
-        write(journal, {'backup': backup.name, 'entries': names, 'present': [n for n in names if (profile / n).exists() or (profile / n).is_symlink()], 'desktopPresent': (profile.parent / 'Library/Application Support/txcode-v2').exists(), 'appOriginal': sys.argv[5] if len(sys.argv) > 5 else '', 'appDestination': sys.argv[6] if len(sys.argv) > 6 else ''})
-        profile.mkdir(parents=True, exist_ok=True)
-        for name in names:
-            source = profile / name
-            if source.exists() or source.is_symlink(): source.rename(displaced / name)
-            if (stage / name).exists() or (stage / name).is_symlink(): (stage / name).rename(source)
-    elif operation == 'journal':
-        value = load(backup / '.restore-journal.json')
-        allowed = {str(pathlib.Path(sys.argv[4]) / name) for name in ('Tx Code.app', 'Tx Code (Nightly).app')}
-        if value.get('appOriginal') not in allowed | {''} or value.get('appDestination') not in allowed: die('Restore journal lacks safe app recovery paths; keep the app stopped for an offline recovery review')
-        print(value['backup']); print(value['appOriginal']); print(value['appDestination'])
-    elif operation == 'recover-data':
-        journal = backup / '.restore-journal.json'
-        if journal.exists():
-            value = load(journal)
-            identifier = value['backup']
-            if not isinstance(identifier, str) or len(identifier) != 16 or not identifier.endswith('Z') or not identifier[:8].isdigit() or not identifier[9:15].isdigit(): die('Invalid restore journal')
-            quarantine = backup / identifier
-            if quarantine.is_symlink(): die('Quarantine symlink refused')
-            rejected = quarantine / 'interrupted-restore'
-            rejected.mkdir(exist_ok=True)
-            for name in value['entries']:
-                if pathlib.Path(name).name != name or name in ('.', '..', 'worktrees'): die('Invalid restore journal entry')
-                source = profile / name
-                previous = quarantine / 'displaced-profile' / name
-                if previous.exists() or previous.is_symlink():
-                    if source.exists() or source.is_symlink(): source.rename(rejected / name)
-                    previous.rename(source)
-                elif name not in value['present'] and (source.exists() or source.is_symlink()): source.rename(rejected / name)
-            desktop = profile.parent / 'Library/Application Support/txcode-v2'
-            previous_desktop = quarantine / 'displaced/desktop'
-            if previous_desktop.exists():
-                if desktop.exists(): desktop.rename(quarantine / 'interrupted-desktop')
-                previous_desktop.rename(desktop)
-            elif not value.get('desktopPresent', False) and desktop.exists(): desktop.rename(quarantine / 'interrupted-desktop')
-            print('Recovered application state; journal retained until app recovery completes.')
-    elif operation == 'finish':
-        (backup.parent / '.restore-journal.json').unlink()
-        descriptor = os.open(backup.parent, os.O_RDONLY)
-        try: os.fsync(descriptor)
-        finally: os.close(descriptor)
-    else: die('Unknown state operation')
-except Exception as error:
-    print('Tx Code updater: ' + str(error), file=sys.stderr)
-    sys.exit(1)
-TXCODE_STATE_PY
-}
-old=
-not_running() {
-  # `command` keeps the bundle path. `comm` is clipped when ps prints more than one column.
-  if [ -n "$process_file" ]; then
-    listing=$(cat "$process_file")
-  else
-    listing=$(ps -axww -o command=) || fail 'Cannot inspect processes.'
-  fi
-  if printf '%s\n' "$listing" | awk \
-    -v a="$apps/Tx Code.app/" \
-    -v b="$apps/Tx Code (Nightly).app/" \
-    -v c="$apps/Tx Code.app.aside/" \
-    -v d="$apps/Tx Code (Nightly).app.aside/" \
-    -v e="$apps/.txcode-update." '
-      {
-        sub(/^[ \t]+/, "")
-        if (index($0,a)==1 || index($0,b)==1 || index($0,c)==1 || index($0,d)==1 || index($0,e)==1) found=1
-      }
-      END { exit !found }'; then
-    fail 'Quit Tx Code with Cmd+Q. Closing the window leaves the bundled server up.'
-  fi
-  jobs=$(launchctl list) || fail 'Cannot inspect launchd jobs.'
-  if printf '%s\n' "$jobs" | awk '$3=="net.coriou.txcode.service" && $1 ~ /^[0-9]+$/ { found=1 } END { exit !found }'; then
-    fail 'Quit Tx Code with Cmd+Q. Closing the window leaves the bundled server up (net.coriou.txcode.service).'
-  fi
-}
-find_old() {
-  old=
-  for path in "$apps/Tx Code.app" "$apps/Tx Code (Nightly).app"; do
-    if [ -e "$path" ] || [ -L "$path" ]; then
-      [ ! -L "$path" ] || fail "App symlink refused: $path"
-      [ -z "$old" ] || fail "Both apps exist: $apps/Tx Code.app and $apps/Tx Code (Nightly).app"
-      old=$path
-    fi
-  done
-}
-aside_path() { printf '%s.aside' "$1"; }
-app_move() {
-  if [ -w "$apps" ]; then mv "$1" "$2"; else sudo mv "$1" "$2"; fi
-}
-clear_stage() {
-  for leftover in "$apps"/.txcode-update.*.app; do
-    [ -e "$leftover" ] || [ -L "$leftover" ] || continue
-    case "${leftover##*/}" in
-      .txcode-update.*.app) ;;
-      *) fail 'Unexpected staging name.' ;;
-    esac
-    [ ! -L "$leftover" ] || fail "Staging symlink refused: $leftover"
-    if [ -w "$apps" ]; then rm -rf "$leftover"; else sudo rm -rf "$leftover"; fi
-    printf 'Removed leftover staging app %s\n' "$leftover"
-  done
-}
-recover_aside() {
-  for base in "$apps/Tx Code.app" "$apps/Tx Code (Nightly).app"; do
-    aside=$(aside_path "$base")
-    if [ -e "$aside" ] || [ -L "$aside" ]; then
-      [ ! -L "$aside" ] || fail "App symlink refused: $aside"
-      if [ -e "$base" ] || [ -L "$base" ]; then
-        fail "Interrupted swap left both $base and $aside. Nothing was deleted."
-      fi
-      app_move "$aside" "$base"
-      fail "Restored $base after an interrupted swap. No data was changed. Quit Tx Code, then run the updater again."
-    fi
-  done
-}
-read_snapshot() {
-  bundle=$1
-  snap_bid=$(field "$bundle/Contents/Info.plist" CFBundleIdentifier) || fail 'Previous app identity failed.'
-  [ "$snap_bid" = net.coriou.txcode ] || fail 'Previous app is not Tx Code.'
-  snap_version=$(field "$bundle/Contents/Info.plist" CFBundleShortVersionString) || fail 'Previous app version unreadable.'
-  snap_commit=$(LC_ALL=C grep -aoE '"t3codeCommitHash"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]{7,40}"' \
-    "$bundle/Contents/Resources/app.asar" 2>/dev/null | tail -1 | sed -E 's/.*"([0-9a-fA-F]{7,40})"$/\1/' || true)
-  snap_commit=${snap_commit:-unread}
-}
 umask 077
-created=$(mktemp -d "${TMPDIR:-/tmp}/txcode-update.XXXXXXXX") || fail 'Cannot create a temporary directory.'
-tmp=$(cd "$created" && pwd -P) || { rm -rf "$created"; fail 'Cannot resolve the temporary directory.'; }
-case "${tmp##*/}" in
-  txcode-update.*) ;;
-  *) rm -rf "$tmp"; fail 'Unexpected temporary directory name.' ;;
-esac
-mounted=0
+created=$(mktemp -d "${TMPDIR:-/tmp}/txcode-update.XXXXXXXX") || die $E_FAIL 'Cannot create a temporary directory.'
+tmp=$(cd "$created" && pwd -P)
+mounted=0 locked=0 stage='' backup=''
+# Only ever remove the directory mktemp just created.
 workdir_ok() {
-  [ -n "${tmp:-}" ] && [ -d "$tmp" ] && [ ! -L "$tmp" ] || return 1
-  case "${tmp##*/}" in txcode-update.*) ;; *) return 1 ;; esac
-  [ "$(cd "$tmp" && pwd -P)" = "$tmp" ] || return 1
+  [ -d "$tmp" ] && [ ! -L "$tmp" ] || return 1
+  case "${tmp##*/}" in txcode-update.*) return 0 ;; *) return 1 ;; esac
 }
-discard_download() {
-  if ! workdir_ok; then
-    if [ -e "$tmp" ] || [ -L "$tmp" ]; then
-      printf 'Tx Code updater: temporary directory changed; download was left in place.\n' >&2
-    fi
-    return 0
-  fi
+as_needed() { if [ -w "$apps" ]; then "$@"; else sudo "$@"; fi; }
+app_move() { as_needed mv "$1" "$2"; }
+cleanup() {
+  local status=$?
+  trap - EXIT
   if [ "$mounted" = 1 ]; then
-    hdiutil detach "$tmp/mount" >/dev/null 2>&1 || hdiutil detach -force "$tmp/mount" >/dev/null 2>&1 || true
-    if mount | grep -F " on ${tmp}/mount " >/dev/null 2>&1; then
-      printf 'Tx Code updater: the disk image is still mounted at %s. Detach it with: hdiutil detach "%s"\n' "$tmp/mount" "$tmp/mount" >&2
+    hdiutil detach "$tmp/mount" -quiet 2>/dev/null || hdiutil detach "$tmp/mount" -force -quiet 2>/dev/null || true
+    if mount | grep -F " on $tmp/mount " >/dev/null 2>&1; then
+      warn "The disk image is still mounted. Detach it with: hdiutil detach \"$tmp/mount\""
     else
       mounted=0
-      rm -rf "$tmp/mount" 2>/dev/null || true
     fi
   fi
-  [ -n "${archive:-}" ] || return 0
-  case "$archive" in Tx-Code-*.dmg) ;; *) return 0 ;; esac
-  if [ -e "$tmp/$archive" ] || [ -L "$tmp/$archive" ] || [ -e "$tmp/SHA256SUMS" ] || [ -L "$tmp/SHA256SUMS" ]; then
-    rm -f "$tmp/$archive" "$tmp/SHA256SUMS" || {
-      printf 'Tx Code updater: could not remove %s from %s.\n' "$archive" "$tmp" >&2
-      return 0
-    }
-    printf 'Removed download %s\n' "$archive"
+  if [ -n "$stage" ] && { [ -e "$stage" ] || [ -L "$stage" ]; }; then as_needed rm -rf "$stage" || true; fi
+  if [ "$status" != 0 ] && [ -n "$backup" ] && [ -d "$backup" ] && [ ! -f "$backup/complete" ]; then
+    warn "Incomplete backup ${backup##*/} cannot be restored; the next run removes it."
   fi
-}
-remove_workdir() {
-  # Only the directory mktemp just created. A replaced path is left alone.
-  workdir_ok || return 0
-  rm -rf "$tmp"
-}
-cleanup() {
-  exit_status=$?
-  trap - EXIT
-  if [ -n "${backup:-}" ] && [ -d "$backup" ] && [ ! -f "$backup/complete" ]; then
-    printf 'Incomplete backup retained at %s; not eligible for rollback.\n' "$backup" >&2
-  fi
-  discard_download || true
-  if [ "$mounted" = 0 ]; then remove_workdir || true; fi
-  if [ "${locked:-0}" = 1 ]; then rmdir "$root/.updater-lock" || true; fi
-  exit "$exit_status"
+  if [ "$mounted" = 0 ] && workdir_ok; then rm -rf "$tmp"; fi
+  if [ "$locked" = 1 ]; then rm -f "$root/.updater-lock/pid" && rmdir "$root/.updater-lock" || true; fi
+  exit "$status"
 }
 trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
-get() { curl -fLsS --connect-timeout 15 --max-time 900 --max-filesize 2147483648 -H 'User-Agent: Tx-Code-macOS-updater' "$1" -o "$2"; }
-field() { plutil -extract "$2" raw -o - "$1"; }
-identity() {
-  bundle=$1
-  expected=$2
-  [ -d "$bundle" ] && [ ! -L "$bundle" ] || return 1
-  bid=$(field "$bundle/Contents/Info.plist" CFBundleIdentifier) || return 1
-  [ "$bid" = net.coriou.txcode ] || return 1
-  version=$(field "$bundle/Contents/Info.plist" CFBundleShortVersionString) || return 1
-  [ -z "$expected" ] || [ "$version" = "$expected" ] || return 1
-  executable=$(field "$bundle/Contents/Info.plist" CFBundleExecutable) || return 1
-  case "$executable" in ''|*/*|.|..) return 1 ;; esac
-  description=$(file -b "$bundle/Contents/MacOS/$executable") || return 1
-  printf '%s\n' "$description" | grep 'Mach-O' >/dev/null || return 1
-  printf '%s\n' "$description" | grep -w "$machine" >/dev/null || return 1
-  unwanted=$(find "$bundle/Contents" \( -name app-update.yml -o -name dev-app-update.yml \) -print) || return 1
-  [ -z "$unwanted" ] || return 1
-  [ -f "$bundle/Contents/Resources/app.asar" ] || return 1
-  # The packaged hash is near the end of app.asar, so the whole archive has to be scanned.
-  commit=$(LC_ALL=C grep -aoE '"t3codeCommitHash"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]{7,40}"' \
-    "$bundle/Contents/Resources/app.asar" | tail -1 | sed -E 's/.*"([0-9a-fA-F]{7,40})"$/\1/') || true
-  [ -n "$commit" ]
+trap 'exit 130' HUP INT TERM
+
+# ---- helpers ---------------------------------------------------------------
+
+json() { plutil -extract "$2" raw -o - "$1" 2>/dev/null; }
+plist() { plutil -extract "$2" raw -o - "$1/Contents/Info.plist" 2>/dev/null; }
+bundle_version() { [ "$(plist "$1" CFBundleIdentifier)" = "$bundle_id" ] && plist "$1" CFBundleShortVersionString; }
+human_kb() { awk -v k="$1" 'BEGIN { if (k >= 1048576) printf "%.1f GB", k / 1048576; else if (k >= 1024) printf "%.0f MB", k / 1024; else printf "%d KB", k }'; }
+size_kb() { du -sk "$1" | awk '{print $1}'; }
+sql_string() { printf '%s' "$1" | sed "s/'/''/g"; }
+fetch() {
+  local mode=$1
+  shift
+  curl "$mode" -fL --connect-timeout 15 --speed-limit 1024 --speed-time 60 --max-time 1800 \
+    --max-filesize 2147483648 -H 'User-Agent: Tx-Code-macOS-updater' "$1" -o "$2"
 }
-size() { du -sh "$1" | cut -f1; }
-valid_child() {
-  id=$1
-  printf '%s\n' "$id" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' || fail 'Invalid or empty backup id.'
-  [ ! -L "$root/$id" ] || fail "Backup symlink refused: $id (realpath may escape root)"
-  [ -d "$root/$id" ] || fail "Missing backup: $id"
-  [ "$(cd "$root/$id" && pwd -P)" = "$root/$id" ] || fail 'Backup realpath escapes root.'
-  [ -f "$root/$id/BACKUP-MANIFEST.txt" ] && [ ! -L "$root/$id/BACKUP-MANIFEST.txt" ] || fail 'Missing manifest.'
+ask() {
+  local answer
+  [ "$yes" = 0 ] || return 0
+  if [ "$2" = y ]; then printf '%s [Y/n] ' "$1"; else printf '%s [y/N] ' "$1"; fi
+  IFS= read -r answer || return 1
+  case $answer in
+    '') [ "$2" = y ] ;;
+    [yY] | [yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
 }
-complete_ids() {
-  : > "$tmp/ids"
-  for child in "$root"/*; do
-    [ -e "$child/complete" ] || continue
-    [ -f "$child/complete" ] && [ ! -L "$child/complete" ] || fail 'Invalid complete marker.'
-    id=${child##*/}
-    valid_child "$id"
-    printf '%s\n' "$id" >> "$tmp/ids"
+
+# The bundled server keeps running after the window closes, so match every process in the bundle.
+app_processes() {
+  local listing
+  if [ -n "$process_file" ]; then listing=$(cat "$process_file"); else listing=$(ps -axww -o command=); fi
+  printf '%s\n' "$listing" | awk -v a="$apps/Tx Code.app/" -v b="$apps/Tx Code (Nightly).app/" \
+    -v c="$apps/Tx Code.app.aside/" -v d="$apps/Tx Code (Nightly).app.aside/" -v e="$apps/.txcode-update." '
+    { sub(/^[ \t]+/, ""); if (index($0, a) == 1 || index($0, b) == 1 || index($0, c) == 1 || index($0, d) == 1 || index($0, e) == 1) print }'
+}
+is_running() { [ -n "$(app_processes)" ]; }
+ensure_stopped() {
+  if launchctl list | awk '$3 == "net.coriou.txcode.service" && $1 ~ /^[0-9]+$/ { f = 1 } END { exit !f }'; then
+    die $E_RUNNING 'The Tx Code background service (net.coriou.txcode.service) is running. Stop it, then run this again.'
+  fi
+  is_running || return 0
+  step 'Quitting Tx Code'
+  osascript -e "quit app id \"$bundle_id\"" >/dev/null 2>&1 || true
+  local waited=0
+  while is_running; do
+    [ "$waited" -lt "$quit_timeout" ] || die $E_RUNNING "Tx Code did not quit within ${quit_timeout}s; a dialog may be waiting, or Terminal lacks permission to control it. Quit Tx Code with Cmd+Q, then run this again. Nothing was changed."
+    sleep 1
+    waited=$((waited + 1))
   done
-  sort -r "$tmp/ids"
 }
-validate_manifest() {
-  manifest=$1
-  awk -F '\t' -v d1="$data1" -v d2="$data2" -v a="$apps/Tx Code.app" -v b="$apps/Tx Code (Nightly).app" '
-    NF!=2 {bad=1}
-    $1=="source" {if ($2!=d1 && $2!=d2 && $2!=a && $2!=b) bad=1; if(seen[$2]++) bad=1; if($2==a || $2==b) apps++ ; next}
-    $1=="format" {if($2!="application-state-v2" || keys[$1]++) bad=1; next}
-    $1 ~ /^(tag|sha256|bundle-id|version|arch|commit)$/ {if(keys[$1]++) bad=1; next}
-    {bad=1}
-    END {if(apps>1 || !keys["tag"] || !keys["sha256"] || !keys["bundle-id"] || !keys["version"] || !keys["arch"] || !keys["commit"]) bad=1; exit bad}' "$manifest" || fail 'Invalid manifest or forbidden source path.'
+
+find_app() {
+  local path
+  old='' installed_version=''
+  for path in "$apps/Tx Code.app" "$apps/Tx Code (Nightly).app"; do
+    [ -e "$path" ] || [ -L "$path" ] || continue
+    [ ! -L "$path" ] || die $E_SAFETY "Refusing a symlinked app: $path"
+    [ -z "$old" ] || die $E_SAFETY "Both $apps/Tx Code.app and $apps/Tx Code (Nightly).app exist. Move the one you do not use to the Trash, then run this again."
+    old=$path
+  done
+  [ -z "$old" ] || installed_version=$(bundle_version "$old") || die $E_SAFETY "$old is not a Tx Code app."
 }
-prune_plan() {
-  complete_ids > "$tmp/complete-list" || fail 'Cannot enumerate safe backups.'
-  # The snapshot about to be written is the one complete backup that is kept.
-  sed -n '1,$p' "$tmp/complete-list" > "$tmp/prune-list"
-  while IFS= read -r id; do
-    validate_manifest "$root/$id/BACKUP-MANIFEST.txt"
-    if ! grep -q '^format' "$root/$id/BACKUP-MANIFEST.txt"; then
-      printf 'Keeping legacy full-profile snapshot %s (manual recovery only)\n' "$root/$id"
-      continue
-    fi
-    [ ! -e "$root/$id/restore-in-progress" ] || continue
-    state verify "$data1" "$root/$id" || fail 'Invalid snapshot; nothing pruned.'
-    printf 'Retention would remove %s (%s)\n' "$root/$id" "$(size "$root/$id")"
-  done < "$tmp/prune-list"
+
+identity() {
+  local bundle=$1 expected=$2 executable description
+  [ -d "$bundle" ] && [ ! -L "$bundle" ] || return 1
+  [ "$(bundle_version "$bundle")" = "$expected" ] || return 1
+  executable=$(plist "$bundle" CFBundleExecutable) || return 1
+  case "$executable" in '' | */* | . | ..) return 1 ;; esac
+  description=$(file -b "$bundle/Contents/MacOS/$executable") || return 1
+  [[ $description == *Mach-O* && $description == *"$machine"* ]] || return 1
+  [ -z "$(find "$bundle/Contents" \( -name app-update.yml -o -name dev-app-update.yml \) -print)" ] || return 1
+  [ -f "$bundle/Contents/Resources/app.asar" ] || return 1
+  # The packaged commit hash sits near the end of app.asar, so the whole archive is scanned.
+  LC_ALL=C grep -aqE '"t3codeCommitHash"[[:space:]]*:[[:space:]]*"[0-9a-fA-F]{7,40}"' "$bundle/Contents/Resources/app.asar"
+}
+
+# ---- backups ---------------------------------------------------------------
+
+backup_ids() {
+  local path id
+  [ -d "$root" ] || return 0
+  for path in "$root"/*; do
+    id=${path##*/}
+    if is_id "$id" && [ -d "$path" ] && [ ! -L "$path" ]; then printf '%s\n' "$id"; fi
+  done | sort -r
+}
+mget() { awk -F '\t' -v k="$2" '$1 == k { print $2; exit }' "$root/$1/manifest"; }
+is_v3() { [ -f "$root/$1/manifest" ] && [ ! -L "$root/$1/manifest" ] && [ "$(mget "$1" format)" = "$backup_format" ]; }
+is_complete() { is_id "$1" && [ -d "$root/$1" ] && [ ! -L "$root/$1" ] && is_v3 "$1" && [ -f "$root/$1/complete" ]; }
+complete_ids() { backup_ids | while IFS= read -r id; do if is_complete "$id"; then printf '%s\n' "$id"; fi; done; }
+legacy_ids() { backup_ids | while IFS= read -r id; do if ! is_v3 "$id"; then printf '%s\n' "$id"; fi; done; }
+remove_backup() {
+  is_id "$1" && [ ! -L "$root/$1" ] || die $E_SAFETY "Refusing to remove $root/$1."
+  rm -rf "${root:?}/$1" 2>/dev/null || as_needed rm -rf "${root:?}/$1"
 }
 prune() {
-  complete_ids > "$tmp/complete-list" || fail 'Cannot enumerate safe backups.'
-  kept_scoped=0
+  local protected=$1 kept=0 id
   while IFS= read -r id; do
-    valid_child "$id"
-    validate_manifest "$root/$id/BACKUP-MANIFEST.txt"
-    if ! grep -q '^format' "$root/$id/BACKUP-MANIFEST.txt"; then continue; fi
-    [ ! -e "$root/$id/restore-in-progress" ] || continue
-    state verify "$data1" "$root/$id" || fail 'Invalid snapshot; retained.'
-    if [ "$kept_scoped" = 0 ]; then kept_scoped=1; continue; fi
-    printf 'Removing backup %s (%s)\n' "$root/$id" "$(size "$root/$id")"
-    rm -rf "$root/$id"
-  done < "$tmp/complete-list"
+    if [ "$kept" -lt "$keep_backups" ]; then
+      kept=$((kept + 1))
+    elif [ "$id" != "$protected" ]; then
+      info "Removing old backup $id"
+      remove_backup "$id"
+    fi
+  done < <(complete_ids)
 }
-prepare_root() {
-  [ ! -L "$root" ] || fail 'Backup root symlink refused.'
-  mkdir -p "$root"
-  root=$(cd "$root" && pwd -P)
+
+can_clone() {
+  local path mount_point target=$root
+  [ "$clone_override" != 0 ] || return 1
+  while [ ! -e "$target" ]; do target=$(dirname "$target"); done
+  for path in "$data1" "$data2"; do
+    [ ! -e "$path" ] || [ "$(stat -f %d "$path")" = "$(stat -f %d "$target")" ] || return 1
+  done
+  mount_point=$(df -P "$target" | awk 'NR == 2 { print $NF }')
+  mount | grep -F " on $mount_point (apfs" >/dev/null
 }
+sources() {
+  local name
+  for name in "${databases[@]}"; do
+    [ ! -f "$data1/userdata/$name" ] || printf '%s\n' "$data1/userdata/$name"
+    [ ! -f "$data1/userdata/$name-wal" ] || printf '%s\n' "$data1/userdata/$name-wal"
+  done
+  for name in "${userdata_entries[@]}"; do [ ! -e "$data1/userdata/$name" ] || printf '%s\n' "$data1/userdata/$name"; done
+  for name in "${desktop_entries[@]}"; do [ ! -e "$data2/$name" ] || printf '%s\n' "$data2/$name"; done
+}
+measure_backup() {
+  local path
+  for path in "$data1" "$data1/userdata" "$data2"; do [ ! -L "$path" ] || die $E_SAFETY "Refusing symlinked app data: $path"; done
+  clone=0
+  if can_clone; then clone=1; fi
+  data_kb=$(sources | while IFS= read -r path; do size_kb "$path"; done | awk '{ s += $1 } END { print s + 0 }')
+  # Clones share blocks with the live data; the headroom covers the WAL checkpoint during verification.
+  if [ "$clone" = 1 ]; then backup_kb=524288; else backup_kb=$((data_kb + data_kb / 10 + 524288)); fi
+}
+backup_label() {
+  if [ "$clone" = 1 ]; then printf '%s of app data, APFS clone (almost no extra disk space)' "$(human_kb "$data_kb")"; else printf '%s of app data, full copy' "$(human_kb "$data_kb")"; fi
+}
+need_space() {
+  local available
+  available=$(df -Pk "$1" | awk 'NR == 2 { print $4 }')
+  [[ $available =~ ^[0-9]+$ ]] || die $E_FAIL "Cannot read free space for $1."
+  [ "$available" -ge "$2" ] || die $E_SPACE "Not enough free space for $3: need $(human_kb "$2"), have $(human_kb "$available"). Nothing was changed. Free some space (prune-legacy may help), then run this again."
+}
+copy() { if [ "$clone" = 1 ]; then cp -c -Rp "$1" "$2"; else cp -Rp "$1" "$2"; fi; }
+
 new_backup() {
-  backup="$root/$(date -u +%Y%m%dT%H%M%SZ)"
-  mkdir "$backup" || fail 'Backup timestamp already exists; try again later.'
+  local id
+  id=$(date -u +%Y%m%dT%H%M%SZ)
+  backup="$root/$id"
+  mkdir "$backup" || die $E_FAIL 'A backup with this timestamp already exists; run this again in a second.'
+  {
+    printf 'format\t%s\nkind\t%s\ncreated\t%s\n' "$backup_format" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'app-name\t%s\napp-version\t%s\ntarget\t%s\n' "${old##*/}" "$installed_version" "$2"
+    printf 'clone\t%s\n' "$([ "$clone" = 1 ] && echo yes || echo no)"
+  } >"$backup/manifest"
 }
-profile_plan() {
-  state plan "$data1" "$root" > "$tmp/profile-paths" || fail 'Cannot safely determine application-state scope.'
-}
-profile_space() {
-  profile_plan
-  set -- "$@"
-  while IFS= read -r source; do set -- "$@" "$source"; done < "$tmp/profile-paths"
-  space_preflight "$@"
-}
-# Reserve full copies plus headroom; never count retention as available space.
-space_preflight() {
-  required=1048576
-  for source in "$@"; do
-    [ -n "$source" ] && [ -e "$source" ] || continue
-    usage=$(du -Ask "$source") || fail "Cannot measure $source"
-    kb=$(printf '%s\n' "$usage" | awk 'NR==1 {print $1}')
-    case "$kb" in ''|*[!0-9]*) fail 'Invalid source size.' ;; esac
-    required=$((required + kb + kb / 5))
-  done
-  for volume in "$root" "$apps" "$tmp" "$(dirname "$data1")" "$(dirname "$data2")"; do
-    available=$(df -Pk "$volume") || fail "Cannot inspect free space: $volume"
-    available=$(printf '%s\n' "$available" | awk 'NR==2 {print $4}')
-    case "$available" in ''|*[!0-9]*) fail 'Invalid free-space result.' ;; esac
-    [ "$available" -ge "$required" ] || fail "Insufficient free space on $volume: need $required KiB including headroom, available $available KiB. No backup started; nothing pruned."
-  done
-}
-recover_transaction() {
-  [ -e "$root/.restore-journal.json" ] || [ -L "$root/.restore-journal.json" ] || return 0
-  state journal "$data1" "$root" "$apps" > "$tmp/recovery-paths" || fail 'Interrupted rollback needs an offline recovery review; journal retained.'
-  recovery_id=$(sed -n '1p' "$tmp/recovery-paths")
-  original_app=$(sed -n '2p' "$tmp/recovery-paths")
-  restored_app=$(sed -n '3p' "$tmp/recovery-paths")
-  valid_child "$recovery_id"
-  quarantine="$root/$recovery_id"
-  validate_manifest "$quarantine/BACKUP-MANIFEST.txt"
-  recorded_original=$(awk -F '\t' -v a="$apps/Tx Code.app" -v b="$apps/Tx Code (Nightly).app" '$1=="source" && ($2==a || $2==b) {print $2}' "$quarantine/BACKUP-MANIFEST.txt")
-  [ "$original_app" = "$recorded_original" ] || fail 'App recovery paths do not match quarantine manifest; journal retained.'
-  recovery_stage="$apps/.txcode-update.recovery.$recovery_id.app"
-  attempt=$(mktemp -d "$quarantine/app-recovery.XXXXXXXX") || fail 'Cannot prepare app recovery; journal retained.'
-  original_aside=
-  if [ -n "$original_app" ]; then
-    original_aside=$(aside_path "$original_app")
-    original_version=$(awk -F '\t' '$1=="version" {print $2}' "$quarantine/BACKUP-MANIFEST.txt")
-    identity "$quarantine/${original_app##*/}" "$original_version" || fail 'Original quarantined app failed validation; journal retained.'
-    space_preflight "$quarantine/${original_app##*/}"
-    ditto "$quarantine/${original_app##*/}" "$tmp/recovery.app" || fail 'Cannot stage original app; journal retained.'
-  fi
-  if [ -e "$recovery_stage" ] || [ -L "$recovery_stage" ]; then
-    [ ! -L "$recovery_stage" ] || fail 'Recovery staging symlink refused; journal retained.'
-    app_move "$recovery_stage" "$attempt/${recovery_stage##*/}" || fail 'Cannot quarantine previous recovery staging; journal retained.'
-  fi
-  if [ -n "$original_app" ]; then
-    app_move "$tmp/recovery.app" "$recovery_stage" || fail 'Original app staging interrupted; journal retained.'
-    identity "$recovery_stage" "$original_version" || fail 'Staged recovery app validation failed; journal retained.'
-  fi
-  state recover-data "$data1" "$root" || fail 'Application-state recovery interrupted; journal retained.'
-  for candidate in "$restored_app" "$original_app" "$original_aside"; do
-    [ -n "$candidate" ] || continue
-    if [ -e "$candidate" ] || [ -L "$candidate" ]; then
-      [ ! -L "$candidate" ] || fail 'App recovery symlink refused; journal retained.'
-      identity "$candidate" '' || fail 'Unexpected app during recovery; journal retained.'
-      app_move "$candidate" "$attempt/${candidate##*/}" || fail 'Cannot quarantine interrupted app; journal retained.'
+# Runs only while Tx Code is stopped, so each database and its WAL form a consistent pair.
+snapshot_data() {
+  local name src result
+  step 'Backing up app data'
+  mkdir "$backup/userdata" "$backup/desktop"
+  for name in "${databases[@]}"; do
+    src="$data1/userdata/$name"
+    [ -f "$src" ] || continue
+    if [ "$clone" = 1 ]; then
+      cp -c "$src" "$backup/userdata/$name"
+      # -shm is a rebuildable index and is not part of the database.
+      [ ! -f "$src-wal" ] || cp -c "$src-wal" "$backup/userdata/$name-wal"
+    else
+      sqlite3 -readonly "$src" "VACUUM INTO '$(sql_string "$backup/userdata/$name")'"
     fi
   done
-  if [ -n "$original_app" ]; then
-    app_move "$recovery_stage" "$original_app" || fail 'Original app recovery interrupted; journal retained.'
-    identity "$original_app" "$original_version" || fail 'Recovered app validation failed; journal retained.'
-  fi
-  state finish "$data1" "$quarantine"
-  fail "Recovered original app and application state after interrupted rollback. Quarantine retained at $quarantine. Nothing launched; inspect before running the updater again."
+  for name in "${userdata_entries[@]}"; do [ ! -e "$data1/userdata/$name" ] || copy "$data1/userdata/$name" "$backup/userdata/$name"; done
+  for name in "${desktop_entries[@]}"; do [ ! -e "$data2/$name" ] || copy "$data2/$name" "$backup/desktop/$name"; done
+  info 'Verifying the backup (reads every database page; large databases take a minute).'
+  for name in "${databases[@]}"; do
+    [ -f "$backup/userdata/$name" ] || continue
+    # The checkpoint folds the copied WAL into the snapshot; Apple's SQLite keeps the emptied files.
+    result=$(sqlite3 "$backup/userdata/$name" 'PRAGMA quick_check; PRAGMA wal_checkpoint(TRUNCATE);' 2>&1) || true
+    [[ $result == $'ok\n0|'* ]] && [ ! -s "$backup/userdata/$name-wal" ] ||
+      die $E_SAFETY "The backup of $name failed SQLite's integrity check (${result%%$'\n'*}). Nothing was installed and your app is unchanged. The live database may be damaged: keep Tx Code closed and investigate before updating."
+    rm -f "$backup/userdata/$name-wal" "$backup/userdata/$name-shm"
+  done
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$backup/complete"
+  info "Backup ${backup##*/} verified."
 }
-prepare_root
-mkdir "$root/.updater-lock" || fail "Another updater or interrupted run owns $root/.updater-lock. Verify no updater is running before removing this empty lock directory."
-locked=1
-not_running
-profile_plan
-recover_transaction
-clear_stage
-recover_aside
-find_old
-
-# version and commit describe the backed-up app. tag and sha256 name the release that replaced it.
-manifest() {
-  printf 'tag\t%s\nsha256\t%s\nbundle-id\t%s\nversion\t%s\narch\t%s\ncommit\t%s\n' "$tag" "$sha" "$snap_bid" "$snap_version" "$machine" "$snap_commit" > "$backup/BACKUP-MANIFEST.txt"
-  printf 'format\tapplication-state-v2\n' >> "$backup/BACKUP-MANIFEST.txt"
-  for source in "$data1" "$data2" "$old"; do
-    [ -n "$source" ] || continue
-    [ ! -e "$source" ] || printf 'source\t%s\n' "$source" >> "$backup/BACKUP-MANIFEST.txt"
+restore_data() {
+  local from=$1 name
+  for name in "${databases[@]}"; do
+    rm -f "$data1/userdata/$name" "$data1/userdata/$name-wal" "$data1/userdata/$name-shm" "$data1/userdata/$name-journal"
+  done
+  mkdir -p "$data1/userdata" "$data2"
+  for name in "${databases[@]}" "${userdata_entries[@]}"; do
+    rm -rf "${data1:?}/userdata/$name"
+    [ ! -e "$from/userdata/$name" ] || copy "$from/userdata/$name" "$data1/userdata/$name"
+  done
+  for name in "${desktop_entries[@]}"; do
+    rm -rf "${data2:?}/$name"
+    [ ! -e "$from/desktop/$name" ] || copy "$from/desktop/$name" "$data2/$name"
   done
 }
-launch() {
-  printf 'Installed: %s\nBackup: %s\n' "$destination" "$backup"
-  printf '%s\n' 'On the first launch of a build that contains migration 066, Tx Code rewrites some historical thread settlement timestamps in ~/.txcode from app versions 0.0.35 through 0.0.38. Putting the old app back does not undo that rewrite. Rollback restores the data backup taken before the swap. Official T3 profiles are not touched.'
-  if [ "$command" = rollback ]; then
-    printf '%s\n' 'Rollback is installed and remains stopped. Reconcile workspaces, pending work and schedules before manually opening Tx Code. Workspace files are current; restored conversation history may be older. Automatic worktree cleanup remains disabled until you enable it again.'
-    return
+# Moves $stage into place and the previous app into the backup. Renames only; nothing is copied.
+swap_in() {
+  local destination=$1
+  ! is_running || die $E_RUNNING 'Tx Code was opened again before the swap. Quit it and run this again; the app was not replaced.'
+  if [ -n "$old" ]; then app_move "$old" "$old.aside"; fi
+  if ! app_move "$stage" "$destination"; then
+    if [ -n "$old" ]; then app_move "$old.aside" "$old"; fi
+    die $E_SAFETY 'Moving the new app into place failed; the previous app was put back.'
   fi
-  if confirm "Launch $destination?"; then
-    open "$destination" || fail "Launch request failed; the installed app and backup were kept. Try opening $destination manually."
-    printf 'Launch requested; application health has not been checked.\n'
-  else
-    printf 'Not launched.\n'
-  fi
-}
-
-if [ "$command" = rollback ]; then
-  prepare_root
-  complete_ids > "$tmp/complete-list" || fail 'Cannot enumerate safe backups.'
-  while IFS= read -r id; do
-    validate_manifest "$root/$id/BACKUP-MANIFEST.txt"
-    saved_version=$(awk -F '\t' '$1=="version" {print $2}' "$root/$id/BACKUP-MANIFEST.txt")
-    printf '%s  version %s  %s\n' "$id" "$saved_version" "$(size "$root/$id")"
-  done < "$tmp/complete-list"
-  printf 'Type the backup id to restore: '
-  IFS= read -r selected || fail 'No backup selected.'
-  valid_child "$selected"
-  [ -f "$root/$selected/complete" ] || fail 'Backup is incomplete.'
-  snapshot="$root/$selected"
-  validate_manifest "$snapshot/BACKUP-MANIFEST.txt"
-  if ! grep -q '^format' "$snapshot/BACKUP-MANIFEST.txt"; then
-    fail "Legacy full-profile rollback requires offline scoped conversion. This updater cannot safely restore old full-profile snapshots automatically and does not implement conversion. Snapshot retained at $snapshot. Current state is unchanged. Keep the artifact for a separate scoped recovery that preserves current workspace files."
-  fi
-  state validate "$data1" "$snapshot" || fail 'Application-state snapshot validation failed.'
-  destination=
-  while IFS="$(printf '\t')" read -r key source; do
-    [ "$key" = source ] || continue
-    case "$source" in
-      "$data1") stored=profile ;;
-      "$data2") stored=desktop ;;
-      *) stored=${source##*/}; destination=$source ;;
-    esac
-    [ -d "$snapshot/$stored" ] && [ ! -L "$snapshot/$stored" ] || fail "Missing snapshot source: $source"
-  done < "$snapshot/BACKUP-MANIFEST.txt"
-  [ -n "$destination" ] || fail 'Snapshot has no app to restore.'
-  identity "$snapshot/${destination##*/}" '' || fail 'Snapshot app identity failed.'
-  prune_plan
-  confirm "Restore $selected application state and app? Current contents will be quarantined; workspace files stay current." || fail 'Aborted.'
-  not_running
-  find_old
-  tag=rollback-quarantine
-  sha=none
-  snap_bid=none
-  snap_version=none
-  snap_commit=none
+  stage=''
   if [ -n "$old" ]; then
-    identity "$old" '' || fail 'Current app identity failed.'
-    snap_bid=$bid
-    snap_version=$version
-    snap_commit=$commit
+    mkdir -p "$backup/app"
+    app_move "$old.aside" "$backup/app/${old##*/}"
   fi
-  for source in "$data1" "$data2"; do
-    [ ! -L "$source" ] || fail "Source symlink refused: $source"
-  done
-  profile_space "$data2" "$old" "$snapshot"
-  new_backup
-  manifest
-  state snapshot "$data1" "$backup"
-  [ ! -e "$data2" ] || ditto "$data2" "$backup/desktop"
-  [ -z "$old" ] || ditto "$old" "$backup/${old##*/}"
-  not_running
-  touch "$backup/restore-in-progress"
-  state verify "$data1" "$backup"
-  touch "$backup/complete"
-  state stage "$data1" "$snapshot" "$backup" || fail 'Cannot prepare safe restored settings; current state is unchanged.'
-  state restore "$data1" "$backup" "$snapshot" "$old" "$destination" || fail 'Restore interrupted; rerun after verifying the updater is stopped to recover the quarantined application state.'
-  mkdir "$backup/displaced"
-  [ ! -e "$data2" ] || mv "$data2" "$backup/displaced/desktop"
-  if [ -d "$snapshot/desktop" ]; then ditto "$snapshot/desktop" "$data2" || fail 'Desktop restore failed; quarantine retained.'; fi
-  stage="$apps/.txcode-update.${tmp##*/}.app"
-  ditto "$snapshot/${destination##*/}" "$tmp/restored.app"
-  app_move "$tmp/restored.app" "$stage"
-  identity "$stage" '' || fail 'Restored app identity failed.'
-  if [ -n "$old" ]; then app_move "$old" "$(aside_path "$old")"; fi
-  app_move "$stage" "$destination" || fail 'App restore interrupted; quarantine and aside retained.'
-  identity "$destination" '' || fail 'Restored app identity failed; quarantine and aside retained.'
-  if [ -n "$old" ]; then app_move "$(aside_path "$old")" "$backup/displaced/${old##*/}"; fi
-  state finish "$data1" "$backup"
-  rm "$backup/restore-in-progress"
-  prune
-  launch
-  exit 0
-fi
+}
 
-get "$api/releases?per_page=100" "$tmp/releases.json" || fail 'Release lookup failed.'
-i=0; best=; best_date=0; best_build=0; release_index=; ambiguous=0
-while [ "$i" -lt 100 ]; do
-  candidate=$(field "$tmp/releases.json" "$i.tag_name" 2>/dev/null) || break
-  draft=$(field "$tmp/releases.json" "$i.draft")
-  pre=$(field "$tmp/releases.json" "$i.prerelease")
-  if [ "$draft" = false ] && [ "$pre" = true ] && printf '%s\n' "$candidate" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$'; then
-    stamp=$(printf '%s' "$candidate" | sed -E 's/.*-nightly\.([0-9]{8})\..*/\1/; s/^0*//')
-    build=$(printf '%s' "${candidate##*.}" | sed 's/^0*//'); build=${build:-0}
-    if [ "$stamp" -gt "$best_date" ] || { [ "$stamp" -eq "$best_date" ] && [ "$build" -gt "$best_build" ]; }; then
-      best=$candidate; best_date=$stamp; best_build=$build; release_index=$i; ambiguous=0
-    elif [ "$stamp" -eq "$best_date" ] && [ "$build" -eq "$best_build" ]; then ambiguous=1; fi
+# ---- leftovers from interrupted runs ---------------------------------------
+
+take_lock() {
+  local lock="$root/.updater-lock" pid
+  [ ! -L "$root" ] || die $E_SAFETY "Refusing a symlinked backup folder: $root"
+  mkdir -p "$root"
+  root=$(cd "$root" && pwd -P)
+  lock="$root/.updater-lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    pid=$(cat "$lock/pid" 2>/dev/null || true)
+    if [[ $pid =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then
+      if ! { rm -f "$lock/pid" && rmdir "$lock" && mkdir "$lock"; }; then die $E_SAFETY "Cannot clear the stale lock $lock."; fi
+      info 'Cleared the lock of an interrupted run.'
+    else
+      die $E_SAFETY "Another updater run holds $lock. If none is running, remove that folder and run this again."
+    fi
   fi
-  i=$((i + 1))
-done
-[ "$ambiguous" = 0 ] || fail 'Ambiguous newest nightly.'
-[ -n "$best" ] || fail 'No qualifying nightly prerelease found.'
-tag=$best
-release_version=${tag#v}
-archive="Tx-Code-$release_version-$arch.dmg"
-i=0; dmg_size=; sums=0
-while name=$(field "$tmp/releases.json" "$release_index.assets.$i.name" 2>/dev/null); do
-  if [ "$name" = "$archive" ]; then dmg_size=$(field "$tmp/releases.json" "$release_index.assets.$i.size"); fi
-  [ "$name" != SHA256SUMS ] || sums=1
-  i=$((i + 1))
-done
-if [ -z "$dmg_size" ] || [ "$sums" != 1 ]; then
-  [ "$arch" != arm64 ] || fail "$tag lacks $archive and/or SHA256SUMS. Apple Silicon builds are not published yet."
-  fail "$tag lacks $archive and/or SHA256SUMS; refusing older nightlies."
-fi
-case "$dmg_size" in ''|*[!0-9]*) fail 'Invalid download size.' ;; esac
-[ "$dmg_size" -gt 0 ] && [ "$dmg_size" -le 2147483648 ] || fail 'DMG size must be between 1 byte and 2 GiB.'
-confirm "Download $tag: $archive ($dmg_size bytes)?" || fail 'Aborted.'
-get "$web/releases/download/$tag/$archive" "$tmp/$archive" || fail 'DMG download failed.'
-get "$web/releases/download/$tag/SHA256SUMS" "$tmp/SHA256SUMS" || fail 'Checksum download failed.'
-for downloaded in "$tmp/$archive" "$tmp/SHA256SUMS"; do
-  bytes=$(wc -c < "$downloaded")
-  [ "$bytes" -gt 0 ] && [ "$bytes" -le 2147483648 ] || fail 'Empty or oversized download.'
-done
-sha=$(awk -v name="$archive" '$1 ~ /^[0-9a-fA-F]{64}$/ {line=$0; sub(/^[^ ]+[ ]+/,"",line); sub(/^\*/,"",line); if(line==name) {print tolower($1); n++}} END {if(n!=1) exit 1}' "$tmp/SHA256SUMS") || fail 'Missing or ambiguous checksum line.'
-actual=$(shasum -a 256 "$tmp/$archive" | cut -d ' ' -f1)
-[ "$sha" = "$actual" ] || fail 'Checksum mismatch.'
-mkdir "$tmp/mount"
-hdiutil attach -readonly -nobrowse -mountpoint "$tmp/mount" "$tmp/$archive" >/dev/null || fail 'Mount failed.'
-mounted=1
-find "$tmp/mount" -name '*.app' -prune -print > "$tmp/apps"
-chosen=
-while IFS= read -r path; do
-  id=$(field "$path/Contents/Info.plist" CFBundleIdentifier) || fail 'Unreadable bundle identifier.'
-  case "$id" in com.t3tools.t3code|net.coriou.txcode.dev.*) fail "Forbidden bundle identifier: $id" ;; esac
-  if [ "$id" = net.coriou.txcode ]; then
-    [ -z "$chosen" ] || fail 'More than one Tx Code app in DMG.'
-    chosen=$path
+  locked=1
+  printf '%s\n' "$$" >"$lock/pid"
+}
+recover_aside() {
+  local base aside version newest
+  for base in "$apps/Tx Code.app" "$apps/Tx Code (Nightly).app"; do
+    aside="$base.aside"
+    [ -e "$aside" ] || [ -L "$aside" ] || continue
+    [ -d "$aside" ] && [ ! -L "$aside" ] || die $E_SAFETY "Unexpected $aside. Move it to the Trash, then run this again."
+    if [ ! -e "$apps/Tx Code.app" ] && [ ! -e "$apps/Tx Code (Nightly).app" ]; then
+      app_move "$aside" "$base"
+      info "Put back ${base##*/} after an interrupted update."
+      continue
+    fi
+    # The new app (possibly under the other name) is in place; only the move into the backup was lost.
+    version=$(bundle_version "$aside" || true)
+    newest=$(complete_ids | sed -n 1p)
+    if [ -n "$version" ] && [ -n "$newest" ] && [ ! -e "$root/$newest/app" ] &&
+      [ "$(mget "$newest" app-name)" = "${base##*/}" ] && [ "$(mget "$newest" app-version)" = "$version" ]; then
+      mkdir "$root/$newest/app"
+      app_move "$aside" "$root/$newest/app/${base##*/}"
+      info "Finished an interrupted update: moved the previous app into backup $newest."
+    else
+      die $E_SAFETY "An interrupted update left $aside next to the installed app. Nothing was changed. Move it to the Trash if you no longer need it, then run this again."
+    fi
+  done
+}
+recover_leftovers() {
+  local leftover quarantine source
+  [ ! -e "$root/.restore-journal.json" ] || die $E_SAFETY "An older version of this updater left an unfinished rollback ($root/.restore-journal.json). Recover it by hand first; nothing was changed."
+  if [ -f "$root/.rollback-in-progress" ] && [ "$command" != rollback ]; then
+    IFS=$'\t' read -r quarantine source <"$root/.rollback-in-progress"
+    die $E_SAFETY "A rollback was interrupted. Run 'rollback $source' to finish it, or 'rollback $quarantine' to return to the state before it."
   fi
-done < "$tmp/apps"
-[ -n "$chosen" ] || fail 'No Tx Code app in DMG.'
-case "${chosen##*/}" in 'Tx Code.app'|'Tx Code (Nightly).app') ;; *) fail 'Unexpected bundle filename.' ;; esac
-identity "$chosen" "$release_version" || fail 'Mounted app identity failed.'
-destination="$apps/${chosen##*/}"
-prepare_root
-printf 'Install: %s\nBackup root: %s\n' "$destination" "$root"
-[ ! -L "$data2" ] || fail "Source symlink refused: $data2"
-profile_plan
-set -- "$data2" "$old"
-while IFS= read -r source; do set -- "$@" "$source"; done < "$tmp/profile-paths"
-for source in "$@"; do
-  [ -n "$source" ] || continue
-  if [ -e "$source" ]; then
-    printf 'Backup: %s (%s)\n' "$source" "$(size "$source")"
-  else printf 'Absent (fresh install): %s\n' "$source"; fi
-done
-prune_plan
-confirm 'Back up these paths and swap the app?' || fail 'Aborted.'
-not_running
-recover_aside
-find_old
-profile_space "$data2" "$old" "$chosen"
-new_backup
-snap_bid=none
-snap_version=none
-snap_commit=none
-if [ -n "$old" ]; then read_snapshot "$old"; fi
-manifest
-state snapshot "$data1" "$backup"
-[ ! -e "$data2" ] || ditto "$data2" "$backup/desktop"
-not_running
-stage="$apps/.txcode-update.${tmp##*/}.app"
-[ ! -e "$stage" ] && [ ! -L "$stage" ] || fail 'Staging path already exists.'
-if [ -w "$apps" ]; then
-  ditto "$chosen" "$stage"
-else
-  ditto "$chosen" "$tmp/staged.app"
-  app_move "$tmp/staged.app" "$stage"
-fi
-identity "$stage" "$release_version" || fail 'Staged app identity failed.'
-discard_download
-if [ -n "$old" ]; then app_move "$old" "$(aside_path "$old")"; fi
-if ! app_move "$stage" "$destination"; then
-  if [ -n "$old" ]; then app_move "$(aside_path "$old")" "$old"; fi
-  fail 'Swap failed; previous app restored.'
-fi
-if ! identity "$destination" "$release_version"; then
-  app_move "$destination" "$backup/rejected.app"
-  if [ -n "$old" ]; then app_move "$(aside_path "$old")" "$old"; fi
-  fail 'Installed identity failed; previous app restored.'
-fi
-if [ -n "$old" ]; then app_move "$(aside_path "$old")" "$backup/${old##*/}"; fi
-not_running
-state verify "$data1" "$backup"
-touch "$backup/complete"
-prune
-launch
+  for leftover in "$apps"/.txcode-update.*.app; do
+    [ -e "$leftover" ] || [ -L "$leftover" ] || continue
+    as_needed rm -rf "$leftover"
+    info "Removed leftover staging copy ${leftover##*/}"
+  done
+  recover_aside
+  while IFS= read -r leftover; do
+    if is_v3 "$leftover" && [ ! -f "$root/$leftover/complete" ]; then
+      remove_backup "$leftover"
+      info "Removed incomplete backup $leftover from an earlier run."
+    fi
+  done < <(backup_ids)
+}
+legacy_note() {
+  local count
+  count=$(legacy_ids | awk 'END { print NR }')
+  [ "$count" = 0 ] || row Note "$count backup(s) from an older updater use disk space; see prune-legacy."
+}
+
+# ---- releases --------------------------------------------------------------
+
+find_release() {
+  local file="$tmp/releases.json" rel='' i=0 j=0 name stamp build best_stamp=0 best_build=0 ambiguous=0 sums=0
+  if [ -n "$want_tag" ]; then
+    fetch -sS "$api/releases/tags/$want_tag" "$file" || die $E_NETWORK "Could not find release $want_tag. Check the tag at $web/releases."
+    [ "$(json "$file" draft)" = false ] && [ "$(json "$file" tag_name)" = "$want_tag" ] || die $E_NETWORK "Release $want_tag is not published."
+    tag=$want_tag
+  else
+    fetch -sS "$api/releases?per_page=100" "$file" || die $E_NETWORK 'Could not look up releases on GitHub. Check your connection, then run this again.'
+    tag=''
+    while name=$(json "$file" "$i.tag_name"); do
+      if [[ $name =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.([0-9]{8})\.([0-9]+)$ ]] &&
+        [ "$(json "$file" "$i.draft")" = false ] && [ "$(json "$file" "$i.prerelease")" = true ]; then
+        stamp=$((10#${BASH_REMATCH[1]})) build=$((10#${BASH_REMATCH[2]}))
+        if [ "$stamp" -gt "$best_stamp" ] || { [ "$stamp" -eq "$best_stamp" ] && [ "$build" -gt "$best_build" ]; }; then
+          tag=$name rel="$i." best_stamp=$stamp best_build=$build ambiguous=0
+        elif [ "$stamp" -eq "$best_stamp" ] && [ "$build" -eq "$best_build" ]; then
+          ambiguous=1
+        fi
+      fi
+      i=$((i + 1))
+    done
+    [ -n "$tag" ] || die $E_NETWORK 'No published Tx Code nightly was found.'
+    [ "$ambiguous" = 0 ] || die $E_SAFETY "Two releases claim to be the newest nightly ($tag). Pick one with --version."
+  fi
+  release_version=${tag#v}
+  archive="Tx-Code-$release_version-$arch.dmg"
+  release_date=$(json "$file" "${rel}published_at" || true)
+  release_date=${release_date%%T*}
+  dmg_size=''
+  while name=$(json "$file" "${rel}assets.$j.name"); do
+    if [ "$name" = "$archive" ]; then dmg_size=$(json "$file" "${rel}assets.$j.size"); fi
+    if [ "$name" = SHA256SUMS ]; then sums=1; fi
+    j=$((j + 1))
+  done
+  if [ -z "$dmg_size" ] || [ "$sums" != 1 ]; then
+    [ "$arch" != arm64 ] || die $E_NETWORK "$tag has no $archive. Apple Silicon builds are not published yet."
+    die $E_NETWORK "$tag lacks $archive or SHA256SUMS. Try again after the release finishes uploading."
+  fi
+  [[ $dmg_size =~ ^[0-9]+$ ]] && [ "$dmg_size" -gt 0 ] && [ "$dmg_size" -le 2147483648 ] || die $E_NETWORK 'The release lists an invalid download size.'
+}
+
+download_and_mount() {
+  local sha actual path id
+  need_space "$tmp" $((dmg_size / 1024 + 65536)) 'the download'
+  step "Downloading $archive ($(human_kb $((dmg_size / 1024))))"
+  if [ -t 2 ]; then
+    fetch --progress-bar "$web/releases/download/$tag/$archive" "$tmp/$archive" || die $E_NETWORK 'The download failed. Check your connection, then run this again.'
+  else
+    fetch -sS "$web/releases/download/$tag/$archive" "$tmp/$archive" || die $E_NETWORK 'The download failed. Check your connection, then run this again.'
+  fi
+  fetch -sS "$web/releases/download/$tag/SHA256SUMS" "$tmp/SHA256SUMS" || die $E_NETWORK 'Downloading SHA256SUMS failed. Check your connection, then run this again.'
+  [ "$(wc -c <"$tmp/$archive" | tr -d ' ')" = "$dmg_size" ] || die $E_NETWORK 'The download is incomplete. Run this again.'
+  sha=$(awk -v name="$archive" '$1 ~ /^[0-9a-fA-F]{64}$/ { line = $0; sub(/^[^ ]+[ ]+/, "", line); sub(/^\*/, "", line); if (line == name) { print tolower($1); n++ } } END { if (n != 1) exit 1 }' "$tmp/SHA256SUMS") ||
+    die $E_NETWORK "SHA256SUMS has no single entry for $archive."
+  actual=$(shasum -a 256 "$tmp/$archive" | cut -d ' ' -f1)
+  [ "$sha" = "$actual" ] || die $E_NETWORK 'Checksum mismatch: the download is corrupt or was tampered with. Nothing was changed.'
+  info 'Checksum verified.'
+  mkdir "$tmp/mount"
+  hdiutil attach -readonly -nobrowse -mountpoint "$tmp/mount" "$tmp/$archive" >/dev/null || die $E_SAFETY 'Could not open the disk image.'
+  mounted=1
+  chosen=''
+  while IFS= read -r path; do
+    id=$(plist "$path" CFBundleIdentifier) || die $E_SAFETY 'The disk image contains an unreadable app.'
+    case "$id" in com.t3tools.t3code | net.coriou.txcode.dev.*) die $E_SAFETY "The disk image contains a forbidden app ($id)." ;; esac
+    if [ "$id" = "$bundle_id" ]; then
+      [ -z "$chosen" ] || die $E_SAFETY 'The disk image contains more than one Tx Code app.'
+      chosen=$path
+    fi
+  done < <(find "$tmp/mount" -name '*.app' -prune -print)
+  [ -n "$chosen" ] || die $E_SAFETY 'The disk image contains no Tx Code app.'
+  case "${chosen##*/}" in 'Tx Code.app' | 'Tx Code (Nightly).app') ;; *) die $E_SAFETY "Unexpected app name ${chosen##*/}." ;; esac
+  identity "$chosen" "$release_version" || die $E_SAFETY "The app in the disk image is not a valid Tx Code $release_version build for this Mac."
+}
+
+# ---- commands --------------------------------------------------------------
+
+run_update() {
+  if [ "$mutating" = 1 ]; then
+    take_lock
+    recover_leftovers
+  fi
+  find_app
+  find_release
+  if [ "$installed_version" = "$release_version" ] && [ "$force" = 0 ]; then
+    success "Already up to date ($release_version)."
+    exit 0
+  fi
+  measure_backup
+  printf '%sTx Code update%s\n' "$c_bold" "$c_off"
+  row Installed "${installed_version:-not installed}"
+  row Available "$release_version${release_date:+ (released $release_date)}"
+  row Download "$(human_kb $((dmg_size / 1024)))"
+  row Backup "$(backup_label)"
+  legacy_note
+  if [ "$dry_run" = 1 ]; then
+    success 'Dry run: would download, verify, quit Tx Code, back up, install and reopen. Nothing was changed.'
+    exit 0
+  fi
+  ask "Install $release_version?" y || die $E_CANCEL 'Cancelled. Nothing was changed.'
+  download_and_mount
+  app_kb=$(size_kb "$chosen")
+  need_space "$root" $((backup_kb + app_kb)) 'the backup and the new app'
+  need_space "$apps" $((app_kb + 65536)) 'the new app'
+  ensure_stopped
+  new_backup update "$release_version"
+  snapshot_data
+  step "Installing $release_version"
+  destination="$apps/${chosen##*/}"
+  stage="$apps/.txcode-update.${tmp##*/}.app"
+  if [ -w "$apps" ]; then
+    ditto "$chosen" "$stage" || die $E_FAIL 'Copying the new app failed. Nothing was replaced.'
+  else
+    ditto "$chosen" "$tmp/staged.app" || die $E_FAIL 'Copying the new app failed. Nothing was replaced.'
+    app_move "$tmp/staged.app" "$stage"
+  fi
+  identity "$stage" "$release_version" || die $E_SAFETY 'The copied app failed its identity check. Nothing was replaced.'
+  swap_in "$destination"
+  prune ''
+  step 'Opening Tx Code'
+  open "$destination" || die $E_FAIL "Installed $release_version, but macOS could not open it. Open $destination yourself; backup ${backup##*/} is kept."
+  success "Updated ${installed_version:-Tx Code} -> $release_version. Backup: ${backup##*/}"
+}
+
+run_status() {
+  local id app_version kind label
+  find_app
+  row Installed "${installed_version:-not installed}${old:+ ($old)}"
+  local latest
+  if latest=$(find_release >/dev/null 2>&1 && printf '%s\t%s' "$release_version" "$release_date"); then
+    IFS=$'\t' read -r release_version release_date <<<"$latest"
+    if [ "$release_version" = "$installed_version" ]; then label='up to date'; else label='update available'; fi
+    row Latest "$release_version${release_date:+ (released $release_date)}, $label"
+  else
+    row Latest 'unavailable (could not reach GitHub)'
+  fi
+  row Backups "$root"
+  while IFS= read -r id; do
+    app_version=$(mget "$id" app-version)
+    kind=$(mget "$id" kind)
+    label="$(human_kb "$(size_kb "$root/$id")")"
+    [ "$(mget "$id" clone)" != yes ] || label="$label, cloned"
+    [ -d "$root/$id/app" ] || label="$label, data only"
+    printf '    %s  %-8s app %-32s %s\n' "$id" "$kind" "${app_version:-none}" "$label"
+  done < <(complete_ids)
+  [ -n "$(complete_ids)" ] || info 'No backups yet.'
+  legacy_note
+}
+
+run_rollback() {
+  local ids count choice source_dir target_name target_version has_app=0 index=0 id app_kb
+  if [ "$mutating" = 1 ]; then
+    take_lock
+    recover_leftovers
+  fi
+  ids=$(complete_ids)
+  [ -n "$ids" ] || die $E_FAIL 'There are no backups to roll back to.'
+  if [ -z "$rollback_id" ]; then
+    [ "$yes" = 0 ] && [ -t 0 ] || die $E_USAGE 'Name the backup to restore: rollback <ID>. See status for IDs.'
+    count=$(printf '%s\n' "$ids" | awk 'END { print NR }')
+    while IFS= read -r id; do
+      index=$((index + 1))
+      printf '  %d) %s  app %s\n' "$index" "$id" "$(mget "$id" app-version)"
+    done <<<"$ids"
+    printf 'Restore which backup? [1-%s, Enter to cancel] ' "$count"
+    IFS= read -r choice || choice=''
+    [[ $choice =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ] || die $E_CANCEL 'Cancelled. Nothing was changed.'
+    rollback_id=$(printf '%s\n' "$ids" | sed -n "${choice}p")
+  fi
+  is_complete "$rollback_id" || die $E_USAGE "No complete backup named $rollback_id. See status."
+  source_dir="$root/$rollback_id"
+  target_name=$(mget "$rollback_id" app-name)
+  target_version=$(mget "$rollback_id" app-version)
+  find_app
+  if [ -n "$target_name" ] && [ -d "$source_dir/app/$target_name" ]; then
+    has_app=1
+    identity "$source_dir/app/$target_name" "$target_version" || die $E_SAFETY "The app in backup $rollback_id failed its identity check."
+  elif [ -z "$target_version" ] || [ "$installed_version" != "$target_version" ]; then
+    die $E_SAFETY "Backup $rollback_id holds data for app ${target_version:-none} but no app copy, and ${installed_version:-no app} is installed. Install that version first, then roll back."
+  fi
+  measure_backup
+  printf '%sTx Code rollback%s\n' "$c_bold" "$c_off"
+  row Restore "backup $rollback_id: $([ "$has_app" = 1 ] && echo "app $target_version and its data" || echo 'data only')"
+  row Current "${installed_version:-not installed}; backed up first so you can undo"
+  row Backup "$(backup_label)"
+  if [ "$dry_run" = 1 ]; then
+    success 'Dry run: would quit Tx Code, back up the current state and restore that backup. Nothing was changed.'
+    exit 0
+  fi
+  ask "Roll back to $target_version from $rollback_id?" n || die $E_CANCEL 'Cancelled. Nothing was changed.'
+  app_kb=0
+  if [ "$has_app" = 1 ]; then app_kb=$(size_kb "$source_dir/app"); fi
+  need_space "$root" $((backup_kb + app_kb)) 'the safety backup'
+  ensure_stopped
+  new_backup rollback "$rollback_id"
+  snapshot_data
+  printf '%s\t%s\n' "${backup##*/}" "$rollback_id" >"$root/.rollback-in-progress"
+  step "Restoring data from $rollback_id"
+  restore_data "$source_dir"
+  if [ "$has_app" = 1 ]; then
+    step "Restoring app $target_version"
+    stage="$apps/.txcode-update.${tmp##*/}.app"
+    as_needed cp -c -Rp "$source_dir/app/$target_name" "$stage"
+    identity "$stage" "$target_version" || die $E_SAFETY 'The restored app copy failed its identity check.'
+    swap_in "$apps/$target_name"
+  fi
+  rm -f "$root/.rollback-in-progress"
+  prune "$rollback_id"
+  success "Rolled back to $target_version. The previous state is backup ${backup##*/}; roll back to it to undo."
+  info 'Tx Code was left closed. Open it when ready; worktree files were not changed.'
+}
+
+run_prune_legacy() {
+  local ids id total=0 kb label
+  if [ "$mutating" = 1 ]; then take_lock; fi
+  ids=$(legacy_ids)
+  if [ -z "$ids" ]; then
+    success 'No legacy backups.'
+    exit 0
+  fi
+  printf '%sBackups from older versions of this updater (rollback cannot use them):%s\n' "$c_bold" "$c_off"
+  while IFS= read -r id; do
+    kb=$(size_kb "$root/$id")
+    total=$((total + kb))
+    label=$(human_kb "$kb")
+    [ -f "$root/$id/complete" ] || label="$label, incomplete"
+    printf '  %s  %s\n' "$id" "$label"
+  done <<<"$ids"
+  if [ "$dry_run" = 1 ]; then
+    success "Dry run: would delete $(human_kb "$total"). Nothing was changed."
+    exit 0
+  fi
+  ask "Delete them and free $(human_kb "$total")?" n || die $E_CANCEL 'Cancelled. Nothing was deleted.'
+  while IFS= read -r id; do remove_backup "$id"; done <<<"$ids"
+  success "Deleted. Freed $(human_kb "$total")."
+}
+
+case $command in
+  update) run_update ;;
+  status) run_status ;;
+  rollback) run_rollback ;;
+  prune-legacy) run_prune_legacy ;;
+esac

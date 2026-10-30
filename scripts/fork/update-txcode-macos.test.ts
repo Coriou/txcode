@@ -5,347 +5,76 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import { expect, it } from "vite-plus/test";
 
-const version = "0.1.3-nightly.20261027.42";
-const archive = `Tx-Code-${version}-x64.dmg`;
+const latest = "0.1.6-nightly.20261030.3919";
+const older = "0.1.5-nightly.20261029.3900";
+const dmg = (version: string) => `Tx-Code-${version}-x64.dmg`;
 const payload = "fixture dmg";
 const hash = NodeCrypto.createHash("sha256").update(payload).digest("hex");
+const updater = NodePath.join(import.meta.dirname, "update-txcode-macos.sh");
+const isId = (name: string) => /^\d{8}T\d{6}Z$/.test(name);
 const release = (tag: string, overrides = {}) => ({
   tag_name: tag,
   draft: false,
   prerelease: true,
+  published_at: "2026-10-30T04:00:00Z",
   assets: [
-    { name: archive, size: payload.length },
+    { name: dmg(tag.slice(1)), size: payload.length },
     { name: "SHA256SUMS", size: 200 },
   ],
   ...overrides,
 });
+const releases = [
+  release("v9.0.0", { prerelease: false }),
+  release("v0.1.6-nightly.20261031.1", { draft: true }),
+  release("v0.1.6-prc-media.20261031.2"),
+  release(`v${older}`),
+  release(`v${latest}`),
+  release("v0.1.6-nightly.20261030.999"),
+];
 
-async function fixture(
-  options: {
-    crash?: "installed" | "displaced";
-    state?: boolean;
-    scopedRollback?: boolean;
-    unsafeSnapshot?: boolean;
-    locked?: boolean;
-    copyFailure?: boolean;
-    lowSpace?: boolean;
-    arm?: boolean;
-    running?: boolean;
-    checksum?: string;
-    star?: boolean;
-    backups?: boolean;
-    scopedBackups?: boolean;
-    escape?: boolean;
-    forbidden?: string;
-    pipe?: boolean;
-    aside?: "only" | "both";
-    installed?: boolean | "nightly";
-    rollbackId?: string;
-    confirms?: number;
-    transferFailure?: "lookup" | "dmg" | "checksum";
-  } = {},
-) {
-  const root = await NodeFSP.realpath(
-    await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "txcode-updater-test-")),
-  );
-  const apps = NodePath.join(root, "Applications");
-  const backups = NodePath.join(root, "backups");
-  const bin = NodePath.join(root, "bin");
-  const downloadTmp = NodePath.join(root, "download-tmp");
-  const requests: string[] = [];
-  const server = NodeHttp.createServer((request, response) => {
-    const url = new URL(request.url ?? "/", "http://fixture");
-    requests.push(url.pathname);
-    if (url.pathname === "/repos/Coriou/txcode/releases") {
-      response.end(
-        JSON.stringify([
-          release("v9.0.0", { prerelease: false }),
-          release("v0.1.3-nightly.20261028.100", { draft: true }),
-          release("v0.1.3-prc-media.20261029.200"),
-          release("v0.1.3-nightly.20261027.9"),
-          release(`v${version}`),
-          release("v0.1.3-nightly.20261026.999"),
-        ]),
-      );
-    } else if (url.pathname.endsWith(`/${archive}`)) response.end(payload);
-    else if (url.pathname.endsWith("/SHA256SUMS")) {
-      const digest = options.checksum ?? hash;
-      response.end(options.star ? `${digest} *${archive}\n` : `${digest}  ${archive}\n`);
-    } else {
-      response.statusCode = 404;
-      response.end();
-    }
-  });
-  try {
-    await Promise.all([apps, backups, bin, downloadTmp].map((path) => NodeFSP.mkdir(path)));
-    if (options.locked) await NodeFSP.mkdir(NodePath.join(backups, ".updater-lock"));
-    const bundle = NodePath.join(root, "bundle/Tx Code.app");
-    await NodeFSP.mkdir(NodePath.join(bundle, "Contents/MacOS"), { recursive: true });
-    await NodeFSP.mkdir(NodePath.join(bundle, "Contents/Resources"));
-    await NodeFSP.writeFile(
-      NodePath.join(bundle, "Contents/Info.plist"),
-      JSON.stringify({
-        CFBundleIdentifier: "net.coriou.txcode",
-        CFBundleShortVersionString: version,
-        CFBundleExecutable: "Tx Code",
-      }),
-    );
-    await NodeFSP.writeFile(NodePath.join(bundle, "Contents/MacOS/Tx Code"), "fixture");
-    await NodeFSP.writeFile(
-      NodePath.join(bundle, "Contents/Resources/app.asar"),
-      '{"t3codeCommitHash":"abcdef1234567890"}',
-    );
-    if (options.installed) {
-      await NodeFSP.cp(
-        bundle,
-        NodePath.join(
-          apps,
-          options.installed === "nightly" ? "Tx Code (Nightly).app" : "Tx Code.app",
-        ),
-        { recursive: true },
-      );
-    }
-    if (options.aside) {
-      await NodeFSP.mkdir(NodePath.join(apps, "Tx Code.app.aside"));
-      if (options.aside === "both") await NodeFSP.mkdir(NodePath.join(apps, "Tx Code.app"));
-    }
-    if (options.installed)
-      await NodeFSP.writeFile(
-        NodePath.join(
-          apps,
-          options.installed === "nightly"
-            ? "Tx Code (Nightly).app/fixture-current"
-            : "Tx Code.app/fixture-current",
-        ),
-        "current app",
-      );
-    const profile = NodePath.join(root, "home/.txcode");
-    if (options.state) {
-      await NodeFSP.mkdir(NodePath.join(profile, "userdata"), { recursive: true });
-      await NodeFSP.mkdir(NodePath.join(profile, "worktrees/repo/branch/node_modules"), {
-        recursive: true,
-      });
-      await NodeFSP.writeFile(
-        NodePath.join(profile, "worktrees/repo/branch/node_modules/keep"),
-        "current dependency",
-      );
-      await NodeFSP.writeFile(
-        NodePath.join(profile, "userdata/settings.json"),
-        JSON.stringify({
-          worktreeOnDelete: true,
-          projectSettingsOverrides: {
-            p: { worktreeCleanup: { mode: "custom", rules: { worktreeOnDelete: true } } },
-          },
-        }),
-      );
-      const db = NodeChildProcess.spawnSync("python3", [
-        "-c",
-        "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('CREATE TABLE projection_projects (workspace_root TEXT)'); c.execute('INSERT INTO projection_projects VALUES (?)', (sys.argv[2],)); c.commit()",
-        NodePath.join(profile, "userdata/statev2.sqlite"),
-        NodePath.join(profile, "worktrees/repo/branch"),
-      ]);
-      if (db.status !== 0) throw new Error(db.stderr.toString());
-    }
-    const processes = NodePath.join(root, "processes");
-    await NodeFSP.writeFile(
-      processes,
-      options.running
-        ? `${apps}/Tx Code (Nightly).app/Contents/MacOS/Tx Code\n`
-        : `/worktree/Tx Code.app/script\n/Applications/T3 Code.app/Contents/MacOS/T3 Code\n`,
-    );
-    const shim = NodePath.join(bin, "shim.cjs");
-    await NodeFSP.writeFile(
-      shim,
-      `#!${process.execPath}
-const fs = require('node:fs');
-const path = require('node:path');
-const name = path.basename(process.argv[1]);
-const args = process.argv.slice(2);
-const root = process.env.TXCODE_UPDATE_FIXTURE_ROOT;
-fs.appendFileSync(path.join(root, 'calls'), name + ' ' + args.join(' ') + '\\n');
-if (name === 'uname') console.log(args[0] === '-s' ? 'Darwin' : ${JSON.stringify(options.arm ? "arm64" : "x86_64")});
-else if (name === 'curl') {
-  const failure = ${JSON.stringify(options.transferFailure)};
-  const url = args.find((arg) => arg.startsWith('http'));
-  const selected = failure === 'lookup' ? url.includes('/releases?') : failure === 'dmg' ? url.endsWith('.dmg') : failure === 'checksum' && url.endsWith('/SHA256SUMS');
-  if (selected && args.includes('--connect-timeout') && args.includes('--max-time')) process.exit(28);
-  const result = require('node:child_process').spawnSync('/usr/bin/curl', args, { stdio: 'inherit' });
-  process.exit(result.status ?? 1);
-}
-else if (name === 'df') console.log('Filesystem 1024-blocks Used Available Capacity Mounted on\\nfixture 999999999 0 ${options.lowSpace ? 1 : 999999999} 0% /');
-else if (name === 'launchctl') console.log('PID Status Label');
-else if (name === 'plutil') {
-  try {
-    let value = JSON.parse(fs.readFileSync(args[args.length - 1], 'utf8'));
-    for (const key of args[1].split('.')) value = value[key];
-    if (value === undefined || value === null || typeof value === 'object') process.exit(1);
-    // console.log colorizes booleans and numbers when FORCE_COLOR is set.
-    process.stdout.write(String(value) + '\\n');
-  } catch { process.exit(1); }
-} else if (name === 'hdiutil' && args[0] === 'attach') {
-  fs.cpSync(path.join(root, 'bundle'), args[args.indexOf('-mountpoint') + 1], { recursive: true });
-} else if (name === 'ditto') {
-  if (${Boolean(options.copyFailure)}) process.exit(1);
-  fs.cpSync(args[0], args[1], { recursive: true });
-}
-else if (name === 'file') console.log('Mach-O 64-bit executable x86_64');
-else if (name === 'open') process.exit(99);
-`,
-      { mode: 0o755 },
-    );
-    for (const name of [
-      "df",
-      "uname",
-      "launchctl",
-      "plutil",
-      "hdiutil",
-      "ditto",
-      "file",
-      "open",
-      "curl",
-    ]) {
-      await NodeFSP.symlink(shim, NodePath.join(bin, name));
-    }
-    const manifest =
-      [
-        "tag\tvfixture",
-        "sha256\tnone",
-        "bundle-id\tnet.coriou.txcode",
-        `version\t${version}`,
-        "arch\tx86_64",
-        "commit\tabcdef1",
-        ...(options.forbidden ? [`source\t${options.forbidden}`] : []),
-      ].join("\n") + "\n";
-    if (options.backups || options.escape || options.forbidden || options.rollbackId) {
-      for (const id of ["20260101T000000Z", "20260102T000000Z", "20260103T000000Z"]) {
-        await NodeFSP.mkdir(NodePath.join(backups, id));
-        await NodeFSP.writeFile(NodePath.join(backups, id, "BACKUP-MANIFEST.txt"), manifest);
-        await NodeFSP.writeFile(NodePath.join(backups, id, "complete"), "");
-      }
-      await NodeFSP.mkdir(NodePath.join(backups, "20260104T000000Z"));
-      if (options.escape) {
-        const outside = NodePath.join(root, "outside-backups");
-        await NodeFSP.mkdir(outside);
-        await NodeFSP.writeFile(NodePath.join(outside, "BACKUP-MANIFEST.txt"), manifest);
-        await NodeFSP.writeFile(NodePath.join(outside, "complete"), "");
-        await NodeFSP.symlink(outside, NodePath.join(backups, "20260105T000000Z"));
-      }
-      if (options.rollbackId) {
-        await NodeFSP.cp(bundle, NodePath.join(backups, options.rollbackId, "Tx Code.app"), {
-          recursive: true,
-        });
-        await NodeFSP.writeFile(
-          NodePath.join(backups, options.rollbackId, "BACKUP-MANIFEST.txt"),
-          [
-            "tag\tvfixture",
-            "sha256\tnone",
-            "bundle-id\tnet.coriou.txcode",
-            `version\t${version}`,
-            "arch\tx86_64",
-            "commit\tabcdef1234567890",
-            `source\t${NodePath.join(apps, "Tx Code.app")}`,
-          ].join("\n") + "\n",
-        );
-      }
-    }
-    if (options.scopedBackups) {
-      for (const id of ["20260101T000000Z", "20260102T000000Z", "20260103T000000Z"]) {
-        const snapshot = NodePath.join(backups, id);
-        await NodeFSP.appendFile(
-          NodePath.join(snapshot, "BACKUP-MANIFEST.txt"),
-          "format\tapplication-state-v2\n",
-        );
-        await NodeFSP.mkdir(NodePath.join(snapshot, "profile"));
-        await NodeFSP.writeFile(
-          NodePath.join(snapshot, "APPLICATION-STATE.json"),
-          JSON.stringify({
-            version: 2,
-            entries: [],
-            workspaces: [NodePath.join(profile, "worktrees")],
-          }),
-        );
-      }
-    }
-    const desktop = NodePath.join(root, "home/Library/Application Support/txcode-v2");
-    if (options.state) {
-      await NodeFSP.mkdir(desktop, { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(desktop, "fixture-state"), "current desktop");
-    }
-    if (options.scopedRollback && options.rollbackId) {
-      const snapshot = NodePath.join(backups, options.rollbackId);
-      await NodeFSP.appendFile(
-        NodePath.join(snapshot, "BACKUP-MANIFEST.txt"),
-        `format\tapplication-state-v2\nsource\t${profile}\n`,
-      );
-      await NodeFSP.cp(
-        NodePath.join(profile, "userdata"),
-        NodePath.join(snapshot, "profile/userdata"),
-        { recursive: true },
-      );
-      await NodeFSP.writeFile(
-        NodePath.join(snapshot, "APPLICATION-STATE.json"),
-        JSON.stringify({
-          version: 2,
-          entries: ["userdata"],
-          workspaces: [
-            NodePath.join(profile, "worktrees"),
-            NodePath.join(profile, "worktrees/repo/branch"),
-          ],
-        }),
-      );
-      await NodeFSP.appendFile(
-        NodePath.join(snapshot, "BACKUP-MANIFEST.txt"),
-        `source\t${desktop}\n`,
-      );
-      await NodeFSP.mkdir(NodePath.join(snapshot, "desktop"));
-      await NodeFSP.writeFile(NodePath.join(snapshot, "desktop/fixture-state"), "old desktop");
-      if (options.unsafeSnapshot) {
-        const db = NodeChildProcess.spawnSync("python3", [
-          "-c",
-          "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('CREATE TABLE scheduled_tasks (enabled INTEGER)'); c.execute('INSERT INTO scheduled_tasks VALUES (1)'); c.commit()",
-          NodePath.join(snapshot, "profile/userdata/statev2.sqlite"),
-        ]);
-        if (db.status !== 0) throw new Error(db.stderr.toString());
-      }
-    }
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("No fixture listener");
-    const origin = `http://127.0.0.1:${address.port}`;
-    const source = await NodeFSP.readFile(
-      NodePath.join(import.meta.dirname, "update-txcode-macos.sh"),
-      "utf8",
-    );
-    const script = NodePath.join(root, "update.sh");
-    let scriptSource = source.replace(/https:\/\/(api\.)?github\.com/g, origin);
-    if (options.crash) {
-      const boundary =
-        options.crash === "installed"
-          ? `  identity "$destination" '' || fail 'Restored app identity failed; quarantine and aside retained.'`
-          : '  state finish "$data1" "$backup"';
-      scriptSource = scriptSource.replace(
-        boundary,
-        '  if [ ! -e "$sandbox/crash-used" ]; then touch "$sandbox/crash-used"; exit 97; fi\n' +
-          boundary,
-      );
-    }
-    if (options.crash)
-      scriptSource = scriptSource.replace(
-        '  state finish "$data1" "$quarantine"',
-        '  if [ ! -e "$sandbox/recovery-crash-used" ]; then touch "$sandbox/recovery-crash-used"; exit 98; fi\n  state finish "$data1" "$quarantine"',
-      );
-    await NodeFSP.writeFile(script, scriptSource);
-    const command = options.forbidden || options.rollbackId ? "rollback" : "update";
-    const pty = NodePath.join(root, "terminal.py");
-    await NodeFSP.writeFile(
-      pty,
-      `import os, pty, select, sys
-cmd = sys.argv[1:]
+// One /bin/sh stub stands in for every macOS tool the updater must not really run.
+const stub = `#!/bin/sh
+name=\${0##*/}
+printf '%s %s\\n' "$name" "$*" >> "$TXCODE_UPDATE_FIXTURE_ROOT/calls"
+case $name in
+  uname) if [ "$1" = -s ]; then echo Darwin; else echo "\${FIXTURE_ARCH:-x86_64}"; fi ;;
+  df) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\nfixture 999999999 0 %s 0%% /\\n' "\${FIXTURE_AVAILABLE:-999999999}" ;;
+  launchctl) echo 'PID Status Label' ;;
+  file) echo 'Mach-O 64-bit executable x86_64' ;;
+  open) exit "\${FIXTURE_OPEN_STATUS:-0}" ;;
+  sleep) ;;
+  date)
+    case "$*" in
+      *%Y%m%dT%H%M%SZ*)
+        n=$(cat "$TXCODE_UPDATE_FIXTURE_ROOT/date-counter" 2>/dev/null || echo 0); n=$((n + 1))
+        echo "$n" > "$TXCODE_UPDATE_FIXTURE_ROOT/date-counter"
+        printf '20261030T06%02d%02dZ\n' $((n / 60)) $((n % 60)) ;;
+      *) echo 2026-10-30T06:00:00Z ;;
+    esac ;;
+  osascript) if [ "\${FIXTURE_QUITS:-}" = 1 ]; then : > "$TXCODE_UPDATE_PS"; fi ;;
+  hdiutil)
+    if [ "$1" = attach ]; then
+      for arg; do image=$arg; done
+      while [ $# -gt 0 ]; do if [ "$1" = -mountpoint ]; then mountpoint=$2; fi; shift; done
+      cp -R "$TXCODE_UPDATE_FIXTURE_ROOT/dmgs/\${image##*/}/" "$mountpoint/"
+    fi ;;
+  ditto) if [ -n "\${FIXTURE_COPY_FAILURE:-}" ]; then exit 1; fi; cp -R "$1" "$2" ;;
+  sqlite3)
+    case "$*" in *quick_check*) if [ -n "\${FIXTURE_CORRUPT:-}" ]; then echo '*** in database main ***'; exit 0; fi ;; esac
+    exec /usr/bin/sqlite3 "$@" ;;
+  curl)
+    for arg; do case $arg in http*) url=$arg ;; esac; done
+    case "\${FIXTURE_TRANSFER_FAILURE:-}:$url" in lookup:*per_page*|dmg:*.dmg|checksum:*/SHA256SUMS) exit 28 ;; esac
+    exec /usr/bin/curl "$@" ;;
+esac
+`;
+const terminal = `import os, pty, select, sys
 pid, fd = pty.fork()
 if pid == 0:
-    os.execv(cmd[0], cmd)
+    os.execv(sys.argv[1], sys.argv[1:])
 try:
     while True:
         readable, _, _ = select.select([fd, sys.stdin], [], [])
@@ -365,603 +94,643 @@ try:
 finally:
     _, status = os.waitpid(pid, 0)
     raise SystemExit(os.waitstatus_to_exitcode(status))
-`,
-    );
-    const execute = () =>
-      new Promise<{ code: number | null; output: string }>((resolve, reject) => {
-        const child = NodeChildProcess.spawn(
-          options.pipe ? "/bin/sh" : "python3",
-          options.pipe ? [script] : [pty, "/bin/sh", script, command],
-          {
-            env: {
-              ...process.env,
-              PATH: `${bin}:${process.env.PATH}`,
-              TMPDIR: downloadTmp,
-              TXCODE_UPDATE_FIXTURE: "1",
-              TXCODE_UPDATE_FIXTURE_ROOT: root,
-              TXCODE_UPDATE_APPS: apps,
-              TXCODE_UPDATE_BACKUPS: backups,
-              TXCODE_UPDATE_PS: processes,
-            },
-            stdio: ["pipe", "pipe", "pipe"],
-          },
-        );
-        let output = "";
-        let answered = 0;
-        let sentId = false;
-        const acceptCount = options.confirms ?? (options.rollbackId ? 1 : 2);
-        const receive = (chunk: Buffer) => {
-          output += chunk.toString();
-          if (options.rollbackId && !sentId && output.includes("Type the backup id to restore: ")) {
-            sentId = true;
-            child.stdin.write(`${options.rollbackId}\n`);
-          }
-          const prompts = output.match(/\[y\/yes to continue\]:/g)?.length ?? 0;
-          while (answered < prompts) {
-            child.stdin.write(answered++ < acceptCount ? "yes\n" : "no\n");
-          }
-        };
-        child.stdout.on("data", receive);
-        child.stderr.on("data", receive);
-        child.on("error", reject);
-        child.on("close", (code) => resolve({ code, output }));
-      });
-    const firstResult = await execute();
-    const recoveryResults = [];
-    const recoveryStates = [];
-    if (options.crash) {
-      for (const _attempt of [1, 2]) {
-        recoveryResults.push(await execute());
-        recoveryStates.push({
-          apps: await NodeFSP.readdir(apps),
-          marker: await NodeFSP.readFile(
-            NodePath.join(
-              apps,
-              options.installed === "nightly"
-                ? "Tx Code (Nightly).app/fixture-current"
-                : "Tx Code.app/fixture-current",
-            ),
-            "utf8",
-          ).catch(() => ""),
-          settings: JSON.parse(
-            await NodeFSP.readFile(NodePath.join(profile, "userdata/settings.json"), "utf8"),
-          ),
-          desktop: await NodeFSP.readFile(NodePath.join(desktop, "fixture-state"), "utf8").catch(
-            () => "",
-          ),
-        });
-      }
-    }
-    const result = firstResult;
-    const names = await NodeFSP.readdir(backups);
-    const newest = [...names].sort().at(-1);
-    const previous = newest
-      ? await NodeFSP.readdir(NodePath.join(backups, newest)).catch(() => [] as string[])
-      : [];
-    const leftovers = await NodeFSP.readdir(downloadTmp);
-    if (leftovers.length > 0)
-      throw new Error(`download directory left behind: ${leftovers.join(", ")}`);
-    return {
-      ...result,
-      recoveryResults,
-      recoveryStates,
-      desktopMarker: await NodeFSP.readFile(NodePath.join(desktop, "fixture-state"), "utf8").catch(
-        () => "",
-      ),
-      appMarker: await NodeFSP.readFile(
-        NodePath.join(
-          apps,
-          options.installed === "nightly"
-            ? "Tx Code (Nightly).app/fixture-current"
-            : "Tx Code.app/fixture-current",
-        ),
-        "utf8",
-      ).catch(() => ""),
-      transactionPresent: await NodeFSP.stat(NodePath.join(backups, ".restore-journal.json"))
-        .then(() => true)
-        .catch(() => false),
-      requests,
-      calls: await NodeFSP.readFile(NodePath.join(root, "calls"), "utf8").catch(() => ""),
-      backups: names,
-      apps: await NodeFSP.readdir(apps),
-      previous,
-      savedProfile: newest
-        ? await NodeFSP.readdir(NodePath.join(backups, newest, "profile")).catch(() => [])
-        : [],
-      workspace: await NodeFSP.readFile(
-        NodePath.join(profile, "worktrees/repo/branch/node_modules/keep"),
-        "utf8",
-      ).catch(() => ""),
-      restoredSettings: await NodeFSP.readFile(
-        NodePath.join(profile, "userdata/settings.json"),
-        "utf8",
-      ).catch(() => ""),
-      restoredDatabase: await NodeFSP.readFile(NodePath.join(profile, "userdata/statev2.sqlite"))
-        .then((v) => v.subarray(0, 16).toString())
-        .catch(() => ""),
-      stateManifest: newest
-        ? await NodeFSP.readFile(
-            NodePath.join(backups, newest, "APPLICATION-STATE.json"),
-            "utf8",
-          ).catch(() => "")
-        : "",
-    };
+`;
+
+async function writeApp(path: string, version: string, marker = version) {
+  await NodeFSP.mkdir(NodePath.join(path, "Contents/MacOS"), { recursive: true });
+  await NodeFSP.mkdir(NodePath.join(path, "Contents/Resources"), { recursive: true });
+  await NodeFSP.writeFile(
+    NodePath.join(path, "Contents/Info.plist"),
+    JSON.stringify({
+      CFBundleIdentifier: "net.coriou.txcode",
+      CFBundleShortVersionString: version,
+      CFBundleExecutable: "Tx Code",
+    }),
+  );
+  await NodeFSP.writeFile(NodePath.join(path, "Contents/MacOS/Tx Code"), "fixture");
+  await NodeFSP.writeFile(
+    NodePath.join(path, "Contents/Resources/app.asar"),
+    '{"t3codeCommitHash":"abcdef1234567890"}',
+  );
+  await NodeFSP.writeFile(NodePath.join(path, "Contents/marker"), marker);
+}
+
+function writeDatabase(path: string, rows: number) {
+  const db = new NodeSqlite.DatabaseSync(path);
+  db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;");
+  db.exec("CREATE TABLE IF NOT EXISTS t (v TEXT)");
+  const insert = db.prepare("INSERT INTO t VALUES (?)");
+  db.exec("BEGIN");
+  for (let i = 0; i < rows; i++) insert.run("x".repeat(512));
+  db.exec("COMMIT");
+  return db;
+}
+function countRows(path: string) {
+  const db = new NodeSqlite.DatabaseSync(path, { readOnly: true });
+  try {
+    return (db.prepare("SELECT count(*) AS n FROM t").get() as { n: number }).n;
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await NodeFSP.rm(root, { recursive: true, force: true });
+    db.close();
   }
 }
 
-it("chooses the newest qualifying nightly while retaining legacy full-profile backups", async () => {
-  const result = await fixture({ backups: true });
-  expect(result.code, result.output).toBe(0);
-  expect(result.requests).toEqual([
-    "/repos/Coriou/txcode/releases",
-    `/Coriou/txcode/releases/download/v${version}/${archive}`,
-    `/Coriou/txcode/releases/download/v${version}/SHA256SUMS`,
-  ]);
-  expect(result.apps).toEqual(["Tx Code.app"]);
-  expect(result.backups).toContain("20260101T000000Z");
-  expect(result.backups).toContain("20260102T000000Z");
-  expect(result.backups).toContain("20260103T000000Z");
-  expect(result.backups).toContain("20260104T000000Z");
-  expect(result.backups).toHaveLength(5);
-  expect(result.calls).not.toContain("open ");
-  expect(result.output.split(`Removed download ${archive}`)).toHaveLength(2);
-});
-it("never downloads an Intel DMG on Apple Silicon", async () => {
-  const result = await fixture({ arm: true });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Apple Silicon builds are not published yet");
-  expect(result.requests).toHaveLength(1);
-});
-it("rejects a checksum mismatch before mounting or copying", async () => {
-  const result = await fixture({ checksum: "0".repeat(64) });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Checksum mismatch");
-  expect(result.output).toContain(`Removed download ${archive}`);
-  expect(result.calls).not.toMatch(/hdiutil|ditto/);
-});
-it("removes the download when the swap is declined", async () => {
-  const result = await fixture({ confirms: 1 });
-  expect(result.code, result.output).not.toBe(0);
-  expect(result.output).toContain("Aborted.");
-  expect(result.output).toContain(`Removed download ${archive}`);
-  expect(result.calls).not.toContain("ditto");
-  expect(result.apps).toHaveLength(0);
-});
-it("refuses running app executables before downloading", async () => {
-  const result = await fixture({ running: true });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Cmd+Q");
-  expect(result.requests).toHaveLength(0);
-});
-it("refuses symlink backups before pruning", async () => {
-  const result = await fixture({ escape: true });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Backup symlink refused");
-  expect(result.backups).toContain("20260101T000000Z");
-  expect(result.apps).toHaveLength(0);
-});
-it.each(["/home/fixture/.t3", "/home/fixture/Library/Application Support/t3code-v2"])(
-  "rejects a manifest naming %s",
-  async (forbidden) => {
-    const result = await fixture({ forbidden });
-    expect(result.code).not.toBe(0);
-    expect(result.output).toContain("Invalid manifest or forbidden source path");
-    expect(result.calls).not.toContain("ditto");
-  },
-);
-it("requires terminal stdin even in fixture mode", async () => {
-  const result = await fixture({ pipe: true });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("terminal on stdin");
-});
-it("accepts the star checksum form", async () => {
-  const result = await fixture({ star: true });
-  expect(result.code, result.output).toBe(0);
-  expect(result.calls).not.toContain("open ");
-});
-it("stores the previous app in the backup and leaves no aside bundle", async () => {
-  const result = await fixture({ installed: true });
-  expect(result.code, result.output).toBe(0);
-  expect(result.apps).toEqual(["Tx Code.app"]);
-  expect(result.previous).toContain("Tx Code.app");
-  expect(result.previous).not.toContain("displaced");
-});
-it("restores an interrupted aside bundle and stops", async () => {
-  const result = await fixture({ aside: "only" });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Restored");
-  expect(result.requests).toHaveLength(0);
-  expect(result.apps).toEqual(["Tx Code.app"]);
-});
-it("deletes nothing when an interrupted swap left both bundles", async () => {
-  const result = await fixture({ aside: "both" });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Nothing was deleted");
-  expect(result.requests).toHaveLength(0);
-  expect([...result.apps].sort()).toEqual(["Tx Code.app", "Tx Code.app.aside"]);
-});
-it("refuses automatic legacy full-profile restoration without changing current workspaces or backups", async () => {
-  const result = await fixture({ state: true, installed: true, rollbackId: "20260103T000000Z" });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain(
-    "Legacy full-profile rollback requires offline scoped conversion",
-  );
-  expect(result.apps).toEqual(["Tx Code.app"]);
-  expect(result.backups).toEqual([
-    "20260101T000000Z",
-    "20260102T000000Z",
-    "20260103T000000Z",
-    "20260104T000000Z",
-  ]);
-  expect(result.workspace).toBe("current dependency");
-  expect(result.calls).not.toContain("ditto ");
-  expect(result.calls).not.toContain("open ");
-});
+interface RunResult {
+  code: number | null;
+  output: string;
+}
 
-it("upgrades the legacy nightly bundle to Tx Code.app", async () => {
-  const result = await fixture({ installed: "nightly" });
-  expect(result.code, result.output).toBe(0);
-  expect(result.apps).toEqual(["Tx Code.app"]);
-  expect(result.previous).toContain("Tx Code (Nightly).app");
-});
-
-it.each([
-  ["lookup", "Release lookup failed"],
-  ["dmg", "DMG download failed"],
-  ["checksum", "Checksum download failed"],
-] as const)(
-  "aborts a bounded %s transfer failure before copying",
-  async (transferFailure, message) => {
-    const result = await fixture({ transferFailure, installed: true });
-    expect(result.code, result.output).toBe(1);
-    expect(result.output).toContain(message);
-    expect(result.calls).not.toMatch(/hdiutil|ditto|open /);
-    expect(result.calls).toContain("--connect-timeout 15 --max-time 900");
-    expect(result.apps).toEqual(["Tx Code.app"]);
-    expect(result.backups).toEqual([]);
-  },
-);
-it("reports a completed installation separately when launch fails", async () => {
-  const result = await fixture({ installed: true, confirms: 3 });
-  expect(result.code, result.output).toBe(1);
-  expect(result.output).toContain("Installed:");
-  expect(result.output).toContain("Launch request failed; the installed app and backup were kept");
-  expect(result.apps).toEqual(["Tx Code.app"]);
-  expect(result.previous).toContain("Tx Code.app");
-  expect(result.previous).toContain("complete");
-});
-
-it("refuses insufficient space before creating a snapshot or copying", async () => {
-  const result = await fixture({ lowSpace: true, installed: true });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Insufficient free space");
-  expect(result.backups).toEqual([]);
-  expect(result.calls).not.toContain("ditto ");
-  expect(result.apps).toEqual(["Tx Code.app"]);
-});
-
-it("retains an incomplete snapshot on copy failure without swapping or pruning", async () => {
-  const result = await fixture({ copyFailure: true, installed: true, backups: true });
-  expect(result.code).not.toBe(0);
-  expect(result.previous).not.toContain("complete");
-  expect(result.backups).toContain("20260101T000000Z");
-  expect(result.apps).toEqual(["Tx Code.app"]);
-});
-
-it("refuses an existing updater lock without removing it", async () => {
-  const result = await fixture({ locked: true, installed: true });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("Another updater or interrupted run");
-  expect(result.backups).toEqual([".updater-lock"]);
-  expect(result.calls).not.toContain("ditto ");
-});
-
-it("snapshots application state with a real SQLite database and retains workspace dependencies in place", async () => {
-  const result = await fixture({ state: true, installed: true });
-  expect(result.code, result.output).toBe(0);
-  expect(result.savedProfile).toEqual(["userdata"]);
-  expect(result.workspace).toBe("current dependency");
-  expect(JSON.parse(result.stateManifest)).toMatchObject({ version: 2, entries: ["userdata"] });
-  expect(result.calls).not.toMatch(/ditto .*worktrees/);
-});
-
-it("rolls back scoped state while preserving workspace files and disabling cleanup in old-app settings", async () => {
-  const result = await fixture({
-    state: true,
-    scopedRollback: true,
-    rollbackId: "20260103T000000Z",
-    installed: true,
-  });
-  expect(result.code, result.output).toBe(0);
-  expect(result.workspace).toBe("current dependency");
-  expect(result.restoredDatabase).toBe("SQLite format 3\0");
-  expect(JSON.parse(result.restoredSettings)).toMatchObject({
-    worktreeCleanup: { mode: "off" },
-    worktreeOnDelete: false,
-    continueThreadsAfterServerUpdate: false,
-    projectSettingsOverrides: { p: { worktreeCleanup: { mode: "off" } } },
-  });
-  expect(result.output).toContain("remains stopped");
-  expect(result.calls).not.toContain("open ");
-});
-it("blocks rollback with enabled historical schedules before quarantining or replacing state", async () => {
-  const result = await fixture({
-    state: true,
-    scopedRollback: true,
-    unsafeSnapshot: true,
-    rollbackId: "20260103T000000Z",
-    installed: true,
-  });
-  expect(result.code).not.toBe(0);
-  expect(result.output).toContain("enabled schedules or pending effects");
-  expect(result.workspace).toBe("current dependency");
-  expect(JSON.parse(result.restoredSettings).worktreeOnDelete).toBe(true);
-  expect(result.calls).not.toContain("ditto ");
-});
-
-it("recovers a partially moved scoped restore without moving surviving or newly created workspaces", async () => {
+async function fixture(
+  options: {
+    installed?: "Tx Code.app" | "Tx Code (Nightly).app";
+    installedVersion?: string;
+    state?: boolean;
+    running?: boolean;
+    checksum?: string;
+  } = {},
+) {
   const root = await NodeFSP.realpath(
-    await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "txcode-state-test-")),
+    await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "txcode-updater-test-")),
   );
-  try {
-    const source = await NodeFSP.readFile(
-      NodePath.join(import.meta.dirname, "update-txcode-macos.sh"),
-      "utf8",
-    );
-    const helper = source.split("<<'TXCODE_STATE_PY'\n")[1]?.split("\nTXCODE_STATE_PY")[0];
-    if (!helper) throw new Error("Embedded state helper missing");
-    const profile = NodePath.join(root, "home/.txcode");
-    const backups = NodePath.join(root, "backups");
-    const selected = NodePath.join(backups, "20260101T000000Z");
-    const quarantine = NodePath.join(backups, "20260102T000000Z");
-    const workspace = NodePath.join(profile, "worktrees/repo/branch");
-    const external = NodePath.join(root, "external/repo/branch");
-    await NodeFSP.mkdir(NodePath.join(profile, "userdata"), { recursive: true });
-    await NodeFSP.mkdir(workspace, { recursive: true });
-    await NodeFSP.mkdir(external, { recursive: true });
-    await NodeFSP.symlink(
-      NodePath.join(root, "external"),
-      NodePath.join(profile, "linked-workspaces"),
-    );
-    await NodeFSP.writeFile(NodePath.join(profile, "unknown"), "current unknown state");
-    await NodeFSP.writeFile(
-      NodePath.join(profile, "userdata/settings.json"),
-      JSON.stringify({ worktreesDirectory: NodePath.join(root, "external") }),
-    );
-    await NodeFSP.writeFile(
-      NodePath.join(workspace, "ignored-irreplaceable"),
-      "keep ignored bytes",
-    );
-    await NodeFSP.writeFile(NodePath.join(external, "uncommitted"), "keep external bytes");
-    await NodeFSP.mkdir(selected, { recursive: true });
-    await NodeFSP.mkdir(quarantine);
-    const run = (operation: string, backup: string, extra: string[] = [], injected = "") =>
-      NodeChildProcess.spawnSync(
-        "python3",
-        ["-c", injected + helper, operation, profile, backup, ...extra],
-        { encoding: "utf8" },
-      );
-    expect(run("snapshot", selected).status).toBe(0);
-    await NodeFSP.mkdir(NodePath.join(profile, "worktrees/new-repo/new-branch"), {
-      recursive: true,
-    });
-    await NodeFSP.writeFile(
-      NodePath.join(profile, "userdata/current-only"),
-      "current application bytes",
-    );
-    expect(run("stage", selected, [quarantine]).status).toBe(0);
-    // Inject an I/O failure at the filesystem boundary after the first entry moved.
-    const injection = `import pathlib\n_original_rename = pathlib.Path.rename\ndef _rename(self, target):\n    if self.name == 'userdata' and str(target).endswith('/displaced-profile/userdata'): raise OSError('fixture move failure')\n    return _original_rename(self, target)\npathlib.Path.rename = _rename\n`;
-    const failed = run("restore", quarantine, [selected], injection);
-    expect(failed.status, failed.stderr).toBe(1);
-    expect(failed.stderr).toContain("fixture move failure");
-    const recovered = run("recover-data", backups);
-    expect(recovered.status, recovered.stderr).toBe(0);
-    expect(recovered.stdout).toContain("Recovered application state");
-    expect(run("finish", quarantine).status).toBe(0);
-    expect(await NodeFSP.readFile(NodePath.join(profile, "unknown"), "utf8")).toBe(
-      "current unknown state",
-    );
-    expect(await NodeFSP.readFile(NodePath.join(profile, "userdata/current-only"), "utf8")).toBe(
-      "current application bytes",
-    );
-    expect(await NodeFSP.readFile(NodePath.join(workspace, "ignored-irreplaceable"), "utf8")).toBe(
-      "keep ignored bytes",
-    );
-    expect(await NodeFSP.readFile(NodePath.join(external, "uncommitted"), "utf8")).toBe(
-      "keep external bytes",
-    );
-    expect(await NodeFSP.readlink(NodePath.join(profile, "linked-workspaces"))).toBe(
-      NodePath.join(root, "external"),
-    );
-    expect(
-      (await NodeFSP.stat(NodePath.join(profile, "worktrees/new-repo/new-branch"))).isDirectory(),
-    ).toBe(true);
-    expect(await NodeFSP.readdir(NodePath.join(selected, "profile"))).toEqual([
-      "unknown",
-      "userdata",
-    ]);
-    const absentProfile = profile;
-    await NodeFSP.rename(
-      NodePath.join(profile, "userdata"),
-      NodePath.join(root, "preserved-userdata"),
-    );
-    await NodeFSP.rename(
-      NodePath.join(profile, "unknown"),
-      NodePath.join(root, "preserved-unknown"),
-    );
-    const absentQuarantine = NodePath.join(backups, "20260103T000000Z");
-    await NodeFSP.mkdir(absentQuarantine);
-    const absent = (operation: string, backup: string, extra: string[] = []) =>
-      NodeChildProcess.spawnSync(
-        "python3",
-        ["-c", helper, operation, absentProfile, backup, ...extra],
-        { encoding: "utf8" },
-      );
-    expect(absent("stage", selected, [absentQuarantine]).status).toBe(0);
-    expect(absent("restore", absentQuarantine, [selected]).status).toBe(0);
-    expect((await NodeFSP.stat(NodePath.join(absentProfile, "userdata"))).isDirectory()).toBe(true);
-    expect(absent("recover-data", backups).stdout).toContain("Recovered application state");
-    expect(absent("finish", absentQuarantine).status).toBe(0);
-    expect(await NodeFSP.readdir(absentProfile)).toEqual(["linked-workspaces", "worktrees"]);
-  } finally {
-    await NodeFSP.rm(root, { recursive: true, force: true });
+  const at = (...parts: string[]) => NodePath.join(root, ...parts);
+  const apps = at("Applications");
+  const backups = at("backups");
+  const userdata = at("home/.txcode/userdata");
+  const desktop = at("home/Library/Application Support/txcode-v2");
+  const downloads = at("download-tmp");
+  const requests: string[] = [];
+  const openDatabases: NodeSqlite.DatabaseSync[] = [];
+  const server = NodeHttp.createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://fixture");
+    requests.push(url.pathname);
+    const tagged = url.pathname.match(/^\/repos\/Coriou\/txcode\/releases\/tags\/(.+)$/);
+    const file = url.pathname.split("/").at(-1) ?? "";
+    if (url.pathname === "/repos/Coriou/txcode/releases") response.end(JSON.stringify(releases));
+    else if (tagged) {
+      const found = releases.find((entry) => entry.tag_name === tagged[1]);
+      response.statusCode = found ? 200 : 404;
+      response.end(JSON.stringify(found ?? {}));
+    } else if (file.endsWith(".dmg")) response.end(payload);
+    else if (file === "SHA256SUMS") {
+      const name = dmg(url.pathname.split("/").at(-2)!.slice(1));
+      response.end(`${options.checksum ?? hash}  ${name}\n`);
+    } else {
+      response.statusCode = 404;
+      response.end();
+    }
+  });
+  await Promise.all(
+    [apps, backups, downloads, at("bin"), userdata, desktop].map((path) =>
+      NodeFSP.mkdir(path, { recursive: true }),
+    ),
+  );
+  for (const name of [
+    "uname",
+    "df",
+    "launchctl",
+    "file",
+    "open",
+    "sleep",
+    "date",
+    "osascript",
+    "hdiutil",
+    "ditto",
+    "sqlite3",
+    "curl",
+  ]) {
+    await NodeFSP.writeFile(at("bin", name), stub, { mode: 0o755 });
   }
-});
-
-it.each([
-  ["workspace", false],
-  ["workspace", true],
-  ["desktop-overlap", false],
-  ["desktop-ancestor-overlap", false],
-  ["desktop-symlink-overlap", false],
-  ["app-overlap", false],
-  ["backup-overlap", false],
-  ["scheduled_tasks", false],
-  ["scheduled_tasks", true],
-  ["outbox", false],
-  ["outbox", true],
-  ["unknown-schema", false],
-  ["unknown-schema", true],
-] as const)("inspects legacy state.sqlite (%s, empty v2=%s)", async (scenario, emptyV2) => {
-  const root = await NodeFSP.realpath(
-    await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "txcode-legacy-state-test-")),
+  await NodeFSP.writeFile(at("terminal.py"), terminal);
+  for (const version of [latest, older])
+    await writeApp(at("dmgs", dmg(version), "Tx Code.app"), version);
+  if (options.installed) {
+    await writeApp(
+      NodePath.join(apps, options.installed),
+      options.installedVersion ?? older,
+      "current app",
+    );
+  }
+  await NodeFSP.writeFile(
+    at("processes"),
+    options.running
+      ? `${apps}/Tx Code.app/Contents/Frameworks/Tx Code Helper.app/Contents/MacOS/Tx Code Helper\n`
+      : `/worktree/Tx Code.app/script\n/Applications/T3 Code.app/Contents/MacOS/T3 Code\n`,
   );
-  try {
-    const source = await NodeFSP.readFile(
-      NodePath.join(import.meta.dirname, "update-txcode-macos.sh"),
-      "utf8",
-    );
-    const helper = source.split("<<'TXCODE_STATE_PY'\n")[1]?.split("\nTXCODE_STATE_PY")[0];
-    if (!helper) throw new Error("Embedded state helper missing");
-    const profile = NodePath.join(root, "profile");
-    await NodeFSP.mkdir(NodePath.join(profile, "userdata"), { recursive: true });
-    await NodeFSP.mkdir(NodePath.join(profile, "custom-repo"));
+  if (options.state) {
+    openDatabases.push(writeDatabase(NodePath.join(userdata, "statev2.sqlite"), 4000));
+    await NodeFSP.writeFile(NodePath.join(userdata, "settings.json"), '{"generation":"current"}');
+    await NodeFSP.mkdir(NodePath.join(userdata, "secrets"), { mode: 0o700 });
+    await NodeFSP.writeFile(NodePath.join(userdata, "secrets/server-signing-key.bin"), "secret");
+    await NodeFSP.mkdir(NodePath.join(userdata, "attachments/thread"), { recursive: true });
+    await NodeFSP.writeFile(NodePath.join(userdata, "attachments/thread/image.png"), "image");
+    for (const excluded of ["logs", "browser-artifacts", "server-browser"]) {
+      await NodeFSP.mkdir(NodePath.join(userdata, excluded));
+      await NodeFSP.writeFile(NodePath.join(userdata, excluded, "big"), "not backed up");
+    }
+    await NodeFSP.mkdir(at("home/.txcode/worktrees/repo/branch/node_modules"), { recursive: true });
     await NodeFSP.writeFile(
-      NodePath.join(profile, "custom-repo/ignored-irreplaceable"),
-      "surviving workspace bytes",
+      at("home/.txcode/worktrees/repo/branch/node_modules/keep"),
+      "current dependency",
     );
-    const setup = NodeChildProcess.spawnSync("python3", [
-      "-c",
-      `import pathlib,sqlite3,sys
-profile=pathlib.Path(sys.argv[1])
-c=sqlite3.connect(profile/'userdata/state.sqlite')
-if sys.argv[2]=='unknown-schema': c.execute('CREATE TABLE historical_projects (root TEXT)')
-else:
- c.execute('CREATE TABLE projection_projects (workspace_root TEXT)')
- workspace=profile/'custom-repo'
- if sys.argv[2]=='desktop-overlap': workspace=profile.parent/'Library/Application Support/txcode-v2/project'
- if sys.argv[2]=='desktop-ancestor-overlap': workspace=profile.parent
- if sys.argv[2]=='desktop-symlink-overlap':
-  alias=profile.parent/'desktop-link'
-  alias.symlink_to(profile.parent/'Library/Application Support/txcode-v2')
-  workspace=alias/'project'
- if sys.argv[2]=='app-overlap': workspace=profile.parent/'Applications/Tx Code.app/project'
- if sys.argv[2]=='backup-overlap': workspace=profile.parent/'backup/project'
- c.execute('INSERT INTO projection_projects VALUES (?)', (str(workspace),))
- if sys.argv[2]=='scheduled_tasks':
-  c.execute('CREATE TABLE scheduled_tasks (enabled INTEGER)')
-  c.execute('INSERT INTO scheduled_tasks VALUES (1)')
- if sys.argv[2]=='outbox':
-  c.execute('CREATE TABLE orchestration_v2_effect_outbox (status TEXT)')
-  c.execute("INSERT INTO orchestration_v2_effect_outbox VALUES ('pending')")
-c.commit(); c.close()
-if sys.argv[3]=='true': sqlite3.connect(profile/'userdata/statev2.sqlite').close()
-`,
-      profile,
-      scenario,
-      String(emptyV2),
-    ]);
-    expect(setup.status, setup.stderr.toString()).toBe(0);
-    const operation =
-      scenario === "workspace" || scenario === "unknown-schema" || scenario.endsWith("-overlap")
-        ? "plan"
-        : "check-work";
-    const backup = NodePath.join(root, "backup");
-    await NodeFSP.mkdir(backup);
-    await NodeFSP.cp(profile, NodePath.join(backup, "profile"), { recursive: true });
-    const result = NodeChildProcess.spawnSync(
-      "python3",
-      ["-c", helper, operation, profile, backup],
-      {
-        encoding: "utf8",
+    for (const entry of ["Local Storage", "IndexedDB", "Cache"]) {
+      await NodeFSP.mkdir(NodePath.join(desktop, entry));
+      await NodeFSP.writeFile(NodePath.join(desktop, entry, "data"), "current desktop");
+    }
+  }
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No fixture listener");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const source = await NodeFSP.readFile(updater, "utf8");
+  await NodeFSP.writeFile(
+    at("update.sh"),
+    source.replace(/https:\/\/(api\.)?github\.com/g, origin),
+  );
+
+  const run = (
+    args: string[],
+    { env = {}, answers }: { env?: Record<string, string>; answers?: string[] } = {},
+  ) =>
+    new Promise<RunResult>((resolve, reject) => {
+      const command = answers
+        ? ["python3", [at("terminal.py"), "/bin/bash", at("update.sh"), ...args]]
+        : ["/bin/bash", [at("update.sh"), ...args]];
+      const child = NodeChildProcess.spawn(command[0] as string, command[1] as string[], {
         env: {
           ...process.env,
-          TXCODE_STATE_APPS: NodePath.join(root, "Applications"),
-          TXCODE_STATE_BACKUPS: backup,
+          NO_COLOR: "1",
+          PATH: `${at("bin")}:${process.env.PATH}`,
+          TMPDIR: downloads,
+          TXCODE_UPDATE_FIXTURE: "1",
+          TXCODE_UPDATE_FIXTURE_ROOT: root,
+          TXCODE_UPDATE_APPS: apps,
+          TXCODE_UPDATE_BACKUPS: backups,
+          TXCODE_UPDATE_PS: at("processes"),
+          ...env,
         },
-      },
-    );
-    if (scenario === "workspace") {
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout.trim().split("\n")).toEqual([NodePath.join(profile, "userdata")]);
-    } else {
-      expect(result.status, result.stderr).not.toBe(0);
-      expect(result.stderr).toContain(
-        scenario.endsWith("-overlap")
-          ? "Workspace overlaps updater-managed path"
-          : scenario === "unknown-schema"
-            ? "Unsupported application database schema"
-            : "enabled schedules or pending effects",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let output = "";
+      let answered = 0;
+      const receive = (chunk: Buffer) => {
+        output += chunk.toString();
+        const prompts = output.match(/\[(Y\/n|y\/N|1-\d+, Enter to cancel)\] /g)?.length ?? 0;
+        while (answers && answered < prompts) child.stdin.write(`${answers[answered++] ?? ""}\n`);
+      };
+      child.stdout.on("data", receive);
+      child.stderr.on("data", receive);
+      child.on("error", reject);
+      child.on("close", async (code) => {
+        const leftovers = await NodeFSP.readdir(downloads);
+        if (leftovers.length > 0)
+          reject(new Error(`temporary files left: ${leftovers.join(", ")}`));
+        else resolve({ code, output });
+      });
+    });
+
+  return {
+    root,
+    apps,
+    backups,
+    userdata,
+    desktop,
+    requests,
+    run,
+    calls: () => NodeFSP.readFile(at("calls"), "utf8").catch(() => ""),
+    ls: (path: string) => NodeFSP.readdir(path).then((names) => names.sort()),
+    read: (path: string) => NodeFSP.readFile(path, "utf8").catch(() => ""),
+    exists: (path: string) =>
+      NodeFSP.lstat(path)
+        .then(() => true)
+        .catch(() => false),
+    backupIds: () => NodeFSP.readdir(backups).then((names) => names.filter(isId).sort().reverse()),
+    closeDatabases: () => {
+      for (const db of openDatabases.splice(0)) db.close();
+    },
+    async makeBackup(
+      id: string,
+      backup: {
+        version?: string;
+        appName?: string;
+        withApp?: boolean;
+        complete?: boolean;
+        settings?: string;
+      } = {},
+    ) {
+      const dir = NodePath.join(backups, id);
+      const appName = backup.appName ?? "Tx Code.app";
+      const version = backup.version ?? older;
+      await NodeFSP.mkdir(NodePath.join(dir, "userdata"), { recursive: true });
+      await NodeFSP.mkdir(NodePath.join(dir, "desktop/Local Storage"), { recursive: true });
+      await NodeFSP.writeFile(
+        NodePath.join(dir, "manifest"),
+        `format\ttxcode-backup-v3\nkind\tupdate\ncreated\t2026-10-01T00:00:00Z\napp-name\t${appName}\napp-version\t${version}\ntarget\t${latest}\nclone\tyes\n`,
       );
-    }
-    expect(
-      await NodeFSP.readFile(NodePath.join(profile, "custom-repo/ignored-irreplaceable"), "utf8"),
-    ).toBe("surviving workspace bytes");
-  } finally {
-    await NodeFSP.rm(root, { recursive: true, force: true });
-  }
+      await NodeFSP.writeFile(
+        NodePath.join(dir, "userdata/settings.json"),
+        backup.settings ?? "{}",
+      );
+      await NodeFSP.writeFile(NodePath.join(dir, "desktop/Local Storage/data"), "old desktop");
+      writeDatabase(NodePath.join(dir, "userdata/statev2.sqlite"), 3).close();
+      if (backup.withApp ?? true)
+        await writeApp(NodePath.join(dir, "app", appName), version, "backup app");
+      if (backup.complete ?? true) await NodeFSP.writeFile(NodePath.join(dir, "complete"), "");
+      return dir;
+    },
+    async makeLegacyBackup(id: string, complete = true) {
+      const dir = NodePath.join(backups, id);
+      await NodeFSP.mkdir(NodePath.join(dir, "profile/worktrees/repo"), { recursive: true });
+      await NodeFSP.writeFile(NodePath.join(dir, "BACKUP-MANIFEST.txt"), "tag\tvold\n");
+      await NodeFSP.writeFile(NodePath.join(dir, "profile/worktrees/repo/file"), "x".repeat(4096));
+      if (complete) await NodeFSP.writeFile(NodePath.join(dir, "complete"), "");
+    },
+    async [Symbol.asyncDispose]() {
+      for (const db of openDatabases.splice(0)) db.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    },
+  };
+}
+
+it("clones allowlisted state, verifies it, swaps the app and reopens it", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", state: true });
+  const result = await fx.run(["--yes"]);
+  fx.closeDatabases();
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain(`Updated ${older} -> ${latest}`);
+  expect(fx.requests).toEqual([
+    "/repos/Coriou/txcode/releases",
+    `/Coriou/txcode/releases/download/v${latest}/${dmg(latest)}`,
+    `/Coriou/txcode/releases/download/v${latest}/SHA256SUMS`,
+  ]);
+  expect(await fx.ls(fx.apps)).toEqual(["Tx Code.app"]);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe(latest);
+  const [id] = await fx.backupIds();
+  const backup = NodePath.join(fx.backups, id!);
+  expect(await fx.ls(backup)).toEqual(["app", "complete", "desktop", "manifest", "userdata"]);
+  expect(await fx.read(NodePath.join(backup, "app/Tx Code.app/Contents/marker"))).toBe(
+    "current app",
+  );
+  expect(await fx.ls(NodePath.join(backup, "userdata"))).toEqual([
+    "attachments",
+    "secrets",
+    "settings.json",
+    "statev2.sqlite",
+  ]);
+  expect(await fx.ls(NodePath.join(backup, "desktop"))).toEqual(["IndexedDB", "Local Storage"]);
+  // Rows still in the live WAL at backup time are part of the verified snapshot.
+  expect(countRows(NodePath.join(backup, "userdata/statev2.sqlite"))).toBe(4000);
+  expect(await fx.read(NodePath.join(backup, "manifest"))).toContain("clone\tyes");
+  expect(await fx.calls()).toMatch(/^open .*Tx Code\.app$/m);
+  expect(await fx.calls()).not.toContain("osascript");
+  expect(await fx.calls()).not.toContain("VACUUM");
+  expect(
+    await fx.read(NodePath.join(fx.root, "home/.txcode/worktrees/repo/branch/node_modules/keep")),
+  ).toBe("current dependency");
+});
+
+it("falls back to full copies and VACUUM INTO when cloning is unavailable", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", state: true });
+  const result = await fx.run(["--yes"], { env: { TXCODE_UPDATE_CLONE: "0" } });
+  fx.closeDatabases();
+  expect(result.code, result.output).toBe(0);
+  const [id] = await fx.backupIds();
+  expect(await fx.read(NodePath.join(fx.backups, id!, "manifest"))).toContain("clone\tno");
+  expect(await fx.calls()).toMatch(/^sqlite3 -readonly .*statev2\.sqlite VACUUM INTO /m);
+  expect(countRows(NodePath.join(fx.backups, id!, "userdata/statev2.sqlite"))).toBe(4000);
+});
+
+it("summarises the update and asks once, defaulting to yes", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", state: true });
+  const result = await fx.run([], { answers: [""] });
+  fx.closeDatabases();
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain(`Installed  ${older}`);
+  expect(result.output).toContain(`Available  ${latest} (released 2026-10-30)`);
+  expect(result.output).toMatch(/Backup +\d+ MB of app data, APFS clone/);
+  expect(result.output.match(/\[Y\/n\]/g)).toHaveLength(1);
+});
+
+it("cancels before downloading when the summary is declined", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  const result = await fx.run([], { answers: ["n"] });
+  expect(result.code, result.output).toBe(3);
+  expect(fx.requests).toEqual(["/repos/Coriou/txcode/releases"]);
+  expect(await fx.backupIds()).toEqual([]);
+});
+
+it("requires a terminal for questions unless --yes is given", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  const result = await fx.run([]);
+  expect(result.code).toBe(2);
+  expect(result.output).toContain("pass --yes");
+  expect(fx.requests).toEqual([]);
+});
+
+it("exits 0 without downloading when already up to date, and --force reinstalls", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", installedVersion: latest });
+  const current = await fx.run(["--yes"]);
+  expect(current.code, current.output).toBe(0);
+  expect(current.output).toContain(`Already up to date (${latest})`);
+  expect(fx.requests).toHaveLength(1);
+  expect(await fx.backupIds()).toEqual([]);
+  const forced = await fx.run(["--yes", "--force"]);
+  expect(forced.code, forced.output).toBe(0);
+  expect(await fx.backupIds()).toHaveLength(1);
+});
+
+it("dry run prints the plan and changes nothing", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", state: true });
+  await fx.makeBackup("20261001T000000Z", { complete: false });
+  const result = await fx.run(["--dry-run"]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain("Dry run:");
+  expect(fx.requests).toEqual(["/repos/Coriou/txcode/releases"]);
+  expect(await fx.backupIds()).toEqual(["20261001T000000Z"]);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("current app");
+});
+
+it("installs a specific tag with --version", async () => {
+  await using fx = await fixture();
+  const result = await fx.run(["--yes", "--version", `v${older}`]);
+  expect(result.code, result.output).toBe(0);
+  expect(fx.requests[0]).toBe(`/repos/Coriou/txcode/releases/tags/v${older}`);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe(older);
+});
+
+it("never downloads an Intel DMG on Apple Silicon", async () => {
+  await using fx = await fixture();
+  const result = await fx.run(["--yes"], { env: { FIXTURE_ARCH: "arm64" } });
+  expect(result.code).toBe(5);
+  expect(result.output).toContain("Apple Silicon builds are not published yet");
+  expect(fx.requests).toHaveLength(1);
+});
+
+it("rejects a checksum mismatch before mounting, backing up or copying", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", checksum: "0".repeat(64) });
+  const result = await fx.run(["--yes"]);
+  expect(result.code).toBe(5);
+  expect(result.output).toContain("Checksum mismatch");
+  expect(await fx.calls()).not.toMatch(/hdiutil|ditto/);
+  expect(await fx.backupIds()).toEqual([]);
 });
 
 it.each([
-  ["installed", true],
-  ["installed", "nightly"],
-  ["installed", false],
-  ["displaced", true],
-  ["displaced", "nightly"],
-  ["displaced", false],
+  ["lookup", "Could not look up releases"],
+  ["dmg", "The download failed"],
+  ["checksum", "Downloading SHA256SUMS failed"],
 ] as const)(
-  "recovers matching original app and data after crash at %s boundary (original=%s)",
-  async (crash, installed) => {
-    const result = await fixture({
-      crash,
-      state: true,
-      scopedRollback: true,
-      rollbackId: "20260103T000000Z",
-      installed,
-    });
-    expect(result.code, result.output).toBe(97);
-    expect(result.recoveryResults[0]?.code, result.recoveryResults[0]?.output).toBe(98);
-    expect(result.recoveryResults[1]?.output).toContain(
-      "Recovered original app and application state",
+  "stops on a bounded %s transfer failure before changing anything",
+  async (failure, message) => {
+    await using fx = await fixture({ installed: "Tx Code.app" });
+    const result = await fx.run(["--yes"], { env: { FIXTURE_TRANSFER_FAILURE: failure } });
+    expect(result.code, result.output).toBe(5);
+    expect(result.output).toContain(message);
+    expect(await fx.calls()).toContain(
+      "--connect-timeout 15 --speed-limit 1024 --speed-time 60 --max-time 1800",
     );
-    expect(result.appMarker).toBe(installed ? "current app" : "");
-    expect(result.apps).toEqual(
-      installed ? [installed === "nightly" ? "Tx Code (Nightly).app" : "Tx Code.app"] : [],
-    );
-    for (const state of result.recoveryStates) {
-      expect(state.apps).toEqual(
-        installed ? [installed === "nightly" ? "Tx Code (Nightly).app" : "Tx Code.app"] : [],
-      );
-      expect(state.marker).toBe(installed ? "current app" : "");
-      expect(state.settings.worktreeOnDelete).toBe(true);
-      expect(state.desktop).toBe("current desktop");
-    }
-    expect(result.transactionPresent).toBe(false);
-    expect(result.desktopMarker).toBe("current desktop");
-    expect(JSON.parse(result.restoredSettings).worktreeOnDelete).toBe(true);
-    expect(result.workspace).toBe("current dependency");
+    expect(await fx.calls()).not.toMatch(/hdiutil|ditto|open /);
+    expect(await fx.backupIds()).toEqual([]);
   },
 );
-it("validates and prunes superseded scoped snapshots after a successful update", async () => {
-  const result = await fixture({ backups: true, scopedBackups: true });
+
+it("quits a running app gracefully before backing up", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", running: true });
+  const result = await fx.run(["--yes"], { env: { FIXTURE_QUITS: "1" } });
   expect(result.code, result.output).toBe(0);
-  expect(result.backups).not.toContain("20260101T000000Z");
-  expect(result.backups).not.toContain("20260102T000000Z");
-  expect(result.backups).not.toContain("20260103T000000Z");
-  expect(result.backups).toHaveLength(2);
+  expect(await fx.calls()).toContain('osascript -e quit app id "net.coriou.txcode"');
+  expect(await fx.backupIds()).toHaveLength(1);
+});
+
+it("stops when the app does not quit in time, without force-quitting or changing anything", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", running: true });
+  const result = await fx.run(["--yes"], { env: { TXCODE_UPDATE_QUIT_TIMEOUT: "3" } });
+  expect(result.code, result.output).toBe(4);
+  expect(result.output).toContain("did not quit within 3s");
+  const calls = await fx.calls();
+  expect(calls.match(/^sleep 1$/gm)).toHaveLength(3);
+  expect(calls).not.toMatch(/^kill|pkill/m);
+  expect(await fx.backupIds()).toEqual([]);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("current app");
+});
+
+it("refuses insufficient space before downloading", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  const result = await fx.run(["--yes"], { env: { FIXTURE_AVAILABLE: "1" } });
+  expect(result.code, result.output).toBe(7);
+  expect(result.output).toContain("Not enough free space");
+  expect(fx.requests).toHaveLength(1);
+  expect(await fx.backupIds()).toEqual([]);
+});
+
+it("keeps the old app when backup verification fails, then cleans up that backup on the next run", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", state: true });
+  const failed = await fx.run(["--yes"], { env: { FIXTURE_CORRUPT: "1" } });
+  expect(failed.code, failed.output).toBe(6);
+  expect(failed.output).toContain("failed SQLite's integrity check");
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("current app");
+  const [incomplete] = await fx.backupIds();
+  expect(await fx.exists(NodePath.join(fx.backups, incomplete!, "complete"))).toBe(false);
+  expect(await fx.calls()).not.toContain("ditto");
+
+  const retried = await fx.run(["--yes"]);
+  fx.closeDatabases();
+  expect(retried.code, retried.output).toBe(0);
+  expect(retried.output).toContain(`Removed incomplete backup ${incomplete}`);
+  expect(await fx.backupIds()).not.toContain(incomplete);
+});
+
+it("keeps the previous app in place when staging the new app fails", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  const result = await fx.run(["--yes"], { env: { FIXTURE_COPY_FAILURE: "1" } });
+  expect(result.code).not.toBe(0);
+  expect(await fx.ls(fx.apps)).toEqual(["Tx Code.app"]);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("current app");
+});
+
+it("reports a completed installation separately when reopening fails", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  const result = await fx.run(["--yes"], { env: { FIXTURE_OPEN_STATUS: "99" } });
+  expect(result.code, result.output).toBe(1);
+  expect(result.output).toContain(`Installed ${latest}, but macOS could not open it`);
+  const [id] = await fx.backupIds();
+  expect(await fx.ls(NodePath.join(fx.backups, id!))).toContain("complete");
+});
+
+it("keeps the newest three complete backups and never touches legacy or symlinked entries", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  for (const id of [
+    "20261001T000000Z",
+    "20261002T000000Z",
+    "20261003T000000Z",
+    "20261004T000000Z",
+  ]) {
+    await fx.makeBackup(id);
+  }
+  await fx.makeLegacyBackup("20260901T000000Z");
+  const outside = NodePath.join(fx.root, "outside");
+  await NodeFSP.mkdir(outside);
+  await NodeFSP.writeFile(NodePath.join(outside, "complete"), "");
+  await NodeFSP.symlink(outside, NodePath.join(fx.backups, "20261005T000000Z"));
+  const result = await fx.run(["--yes"]);
+  expect(result.code, result.output).toBe(0);
+  const ids = await fx.backupIds();
+  expect(ids.slice(1)).toEqual([
+    "20261005T000000Z",
+    "20261004T000000Z",
+    "20261003T000000Z",
+    "20260901T000000Z",
+  ]);
+  expect(ids).toHaveLength(5);
+  expect(await fx.ls(outside)).toEqual(["complete"]);
+  expect(result.output).toContain("1 backup(s) from an older updater");
+});
+
+it("rolls back app and data, backs up the current state first, keeps its source, and can be undone", async () => {
+  await using fx = await fixture({
+    installed: "Tx Code.app",
+    installedVersion: latest,
+    state: true,
+  });
+  fx.closeDatabases();
+  const source = "20261001T000000Z";
+  await fx.makeBackup(source, { settings: '{"generation":"old"}' });
+  for (const id of ["20261002T000000Z", "20261003T000000Z", "20261004T000000Z"]) {
+    await fx.makeBackup(id, { version: latest });
+  }
+  await NodeFSP.writeFile(NodePath.join(fx.userdata, "statev2.sqlite-wal"), "stale wal");
+
+  const result = await fx.run(["rollback", source, "--yes"]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain(`Rolled back to ${older}`);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("backup app");
+  expect(await fx.read(NodePath.join(fx.userdata, "settings.json"))).toBe('{"generation":"old"}');
+  expect(await fx.exists(NodePath.join(fx.userdata, "statev2.sqlite-wal"))).toBe(false);
+  expect(countRows(NodePath.join(fx.userdata, "statev2.sqlite"))).toBe(3);
+  expect(await fx.read(NodePath.join(fx.desktop, "Local Storage/data"))).toBe("old desktop");
+  expect(await fx.read(NodePath.join(fx.desktop, "Cache/data"))).toBe("current desktop");
+  expect(
+    await fx.read(NodePath.join(fx.root, "home/.txcode/worktrees/repo/branch/node_modules/keep")),
+  ).toBe("current dependency");
+  expect(await fx.calls()).not.toMatch(/^open /m);
+  const ids = await fx.backupIds();
+  expect(ids).toContain(source);
+  expect(await fx.exists(NodePath.join(fx.backups, source, "app/Tx Code.app"))).toBe(true);
+  const quarantine = ids[0]!;
+  expect(
+    await fx.read(NodePath.join(fx.backups, quarantine, "app/Tx Code.app/Contents/marker")),
+  ).toBe("current app");
+  expect(await fx.exists(NodePath.join(fx.backups, ".rollback-in-progress"))).toBe(false);
+
+  const undo = await fx.run(["rollback", quarantine, "--yes"]);
+  expect(undo.code, undo.output).toBe(0);
+  expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("current app");
+  expect(await fx.read(NodePath.join(fx.userdata, "settings.json"))).toBe(
+    '{"generation":"current"}',
+  );
+  expect(countRows(NodePath.join(fx.userdata, "statev2.sqlite"))).toBe(4000);
+});
+
+it("refuses to roll back data-only backups onto a different app version", async () => {
+  await using fx = await fixture({
+    installed: "Tx Code.app",
+    installedVersion: latest,
+    state: true,
+  });
+  fx.closeDatabases();
+  await fx.makeBackup("20261001T000000Z", { withApp: false });
+  const result = await fx.run(["rollback", "20261001T000000Z", "--yes"]);
+  expect(result.code, result.output).toBe(6);
+  expect(result.output).toContain("no app copy");
+  expect(await fx.read(NodePath.join(fx.userdata, "settings.json"))).toBe(
+    '{"generation":"current"}',
+  );
+  expect(await fx.backupIds()).toEqual(["20261001T000000Z"]);
+});
+
+it("puts back a previous app left aside when no app is installed, then updates", async () => {
+  await using fx = await fixture();
+  await writeApp(NodePath.join(fx.apps, "Tx Code.app.aside"), older, "current app");
+  const result = await fx.run(["--yes"]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain("Put back Tx Code.app");
+  expect(await fx.ls(fx.apps)).toEqual(["Tx Code.app"]);
+  const [id] = await fx.backupIds();
+  expect(await fx.read(NodePath.join(fx.backups, id!, "app/Tx Code.app/Contents/marker"))).toBe(
+    "current app",
+  );
+});
+
+it("files a renamed Nightly app left aside into its backup after the new Tx Code.app landed", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app", installedVersion: latest });
+  await writeApp(NodePath.join(fx.apps, "Tx Code (Nightly).app.aside"), older, "nightly app");
+  await fx.makeBackup("20261001T000000Z", { appName: "Tx Code (Nightly).app", withApp: false });
+  const result = await fx.run(["--yes"]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain("moved the previous app into backup 20261001T000000Z");
+  expect(result.output).toContain(`Already up to date (${latest})`);
+  expect(await fx.ls(fx.apps)).toEqual(["Tx Code.app"]);
+  expect(
+    await fx.read(
+      NodePath.join(fx.backups, "20261001T000000Z/app/Tx Code (Nightly).app/Contents/marker"),
+    ),
+  ).toBe("nightly app");
+});
+
+it.each([
+  ["an unmatched aside", "Tx Code.app.aside", "left"],
+  ["both app names", "Tx Code (Nightly).app", "Both"],
+] as const)(
+  "changes nothing when %s is next to the installed app",
+  async (_name, extra, message) => {
+    await using fx = await fixture({ installed: "Tx Code.app", installedVersion: latest });
+    await writeApp(NodePath.join(fx.apps, extra), older);
+    const result = await fx.run(["--yes"]);
+    expect(result.code, result.output).toBe(6);
+    expect(result.output).toContain(message);
+    expect(await fx.ls(fx.apps)).toEqual([extra, "Tx Code.app"].sort());
+    expect(fx.requests).toEqual([]);
+  },
+);
+
+it("refuses a lock held by another run without removing it", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  await NodeFSP.mkdir(NodePath.join(fx.backups, ".updater-lock"));
+  const result = await fx.run(["--yes"]);
+  expect(result.code, result.output).toBe(6);
+  expect(result.output).toContain("Another updater run holds");
+  expect(await fx.exists(NodePath.join(fx.backups, ".updater-lock"))).toBe(true);
+  expect(fx.requests).toEqual([]);
+});
+
+it("status lists versions and backups without changing anything", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  await fx.makeBackup("20261001T000000Z");
+  await fx.makeBackup("20261002T000000Z", { complete: false });
+  await fx.makeLegacyBackup("20260901T000000Z");
+  const result = await fx.run(["status"]);
+  expect(result.code, result.output).toBe(0);
+  expect(result.output).toContain(`${latest} (released 2026-10-30), update available`);
+  expect(result.output).toMatch(/20261001T000000Z +update +app 0\.1\.5/);
+  expect(result.output).not.toContain("20261002T000000Z");
+  expect(result.output).toContain("1 backup(s) from an older updater");
+  expect(await fx.backupIds()).toEqual([
+    "20261002T000000Z",
+    "20261001T000000Z",
+    "20260901T000000Z",
+  ]);
+});
+
+it("prune-legacy deletes only legacy backups, after showing their sizes", async () => {
+  await using fx = await fixture();
+  await fx.makeLegacyBackup("20260901T000000Z");
+  await fx.makeLegacyBackup("20260902T000000Z", false);
+  await fx.makeBackup("20261001T000000Z");
+  const declined = await fx.run(["prune-legacy"], { answers: [""] });
+  expect(declined.code, declined.output).toBe(3);
+  expect(declined.output).toMatch(/20260902T000000Z +\d+ KB, incomplete/);
+  expect(await fx.backupIds()).toHaveLength(3);
+  const result = await fx.run(["prune-legacy", "--yes"]);
+  expect(result.code, result.output).toBe(0);
+  expect(await fx.backupIds()).toEqual(["20261001T000000Z"]);
 });

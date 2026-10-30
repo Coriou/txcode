@@ -9,66 +9,31 @@ Older environments whose distribution is unknown also need manual guidance from
 their maintainer. Protocol incompatibility notices still require updating the
 side named in the notice.
 
-For the macOS fork, use the [fork releases](https://github.com/Coriou/txcode/releases)
-and the [manual updater instructions](https://github.com/Coriou/txcode/blob/main/scripts/fork/update-txcode-macos.sh).
-Finish active work on the desktop and its remote clients, quit the app with
-Cmd+Q, then run your local copy of the updater from Terminal. Stop any separately
-running service through its normal service controls before replacing it. Follow
-the updater's backup, replacement, and launch confirmations. Keep the recorded
-backup for recovery. Python 3 is required; the script checks for it before any
-release download and never installs prerequisites itself.
+On macOS, install fork nightlies from the [fork releases](https://github.com/Coriou/txcode/releases)
+with your local copy of the [manual updater](https://github.com/Coriou/txcode/blob/main/scripts/fork/update-txcode-macos.sh).
+Finish active work on the desktop and its remote clients, then run it from
+Terminal with no arguments. It shows the installed and available versions, the
+download size and the backup size, and asks once. It then downloads with a
+progress bar, verifies the checksum and the app's identity, quits Tx Code,
+backs up your app data, installs the new app, and reopens it. If you are already
+on the newest build it says so and changes nothing. Use `--dry-run` to preview,
+`--yes` to skip the question, `--version <tag>` for a specific build, `status`
+to see versions and backups, and `--help` for everything else. Stop a separately
+running service through its normal service controls first.
 
-New backups use version 2 application-state snapshots: userdata (including the
-SQLite databases, secrets, attachments, settings, themes and browser artifacts),
-desktop state, the previous app, and unknown profile content are preserved.
-Default worktrees and configured or database-referenced workspace locations stay
-in place at their exact current paths, including ignored files, dependencies,
-untracked files and uncommitted edits. The script does not recursively filter
-repositories. A workspace overlapping userdata is refused because it cannot be
-safely separated. Workspace intersections with desktop state, the Applications
-directory or the backup directory also stop the updater before replacement.
-Source profile symlinks are refused; managed workspace symlinks
-are left in place. The JSON scope manifest records preserved profile entries and
-workspace locations. Backups cannot recover workspaces deleted or damaged later.
-Restoring an older database may omit newer conversations while their files survive.
+Each backup holds the databases, settings, secrets, keybindings, attachments,
+the desktop app's local storage, and the previous app. Worktrees, logs, caches
+and browser artifacts are never copied or changed. Backups are APFS clones, so
+they take almost no extra space until your data changes. The newest three are
+kept; an incomplete backup from an interrupted run is removed on the next run.
 
-Rollback first quarantines current application state. Version 2 restores replace
-only scoped state; they never replace the whole profile or reset Git worktrees.
-Missing workspace directories or checkpoint refs are reported, without recreation.
-Restored settings disable automatic worktree cleanup and continuation after server
-restart, including project overrides; the original settings remain in the snapshot
-and quarantine. Rollback stays stopped so workspace/history reconciliation can
-happen before reopening the app. Snapshots with enabled schedules or pending or
-running effect-outbox work are refused before replacing current state: choose a
-quiescent snapshot or obtain an offline recovery review. Disabling worktree cleanup
-does not disable scheduled tasks. Workspace inventory and unsafe-work checks read
-both `state.sqlite` and `statev2.sqlite`, including when the latter is empty.
-Unrecognized database schemas stop the operation for an offline recovery review.
-This updater cannot safely restore legacy full-profile snapshots automatically.
-It retains the selected snapshot and leaves current application state untouched.
-Manual recovery needs a separate scoped conversion that preserves current workspace
-files; this updater does not implement that conversion. This deliberate limitation
-avoids replacing current files with the snapshot’s older worktrees.
+`rollback` restores an earlier backup's app and data. It backs up the current
+state first, so you can undo a rollback by rolling back to that new backup.
+Tx Code stays closed afterwards; worktree files keep their current contents, and
+conversations newer than the backup are only in the safety backup.
 
-Space checks reserve full scoped copies plus 20% and 1 GiB of headroom, without
-counting old backups toward available space. Rollback also reserves room for the
-selected state alongside quarantine. Checks are conservative across volumes and
-cannot reserve space against other applications. Keep all profile writers stopped:
-the app and launchd checks cannot prevent a separately started server from writing.
-SQLite's backup API includes committed WAL data and checks database integrity;
-other application files still require an offline copy.
-
-Only one updater may run at a time. After a forced termination, verify that no
-updater remains before removing the empty `.updater-lock` directory in the backup
-root. Failed copies remain incomplete and cannot be selected for rollback; they
-are never automatically deleted. An interrupted scoped rollback leaves a journal;
-the next run restores the original app, application state and desktop state as
-one recovery operation, then stops for inspection. The journal remains until all
-parts match, including when the original app was absent or had a different name.
-Interrupted copies and app bundles remain quarantined. Legacy full-profile
-snapshots are excluded from automatic retention; complete scoped snapshots are
-validated before pruning. Retention runs only after success.
-Installation completion and a healthy relaunch are separate outcomes.
+Backups made by older versions of the updater cannot be restored by it. Run
+`prune-legacy` to see their sizes and delete them.
 
 Do not use `t3 update`, `t3 service install`, or an upstream npm command to update
 this fork. An unchanged upstream client may still display its own npm commands;
