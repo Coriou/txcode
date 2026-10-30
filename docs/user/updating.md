@@ -19,7 +19,9 @@ backs up your app data, installs the new app, and reopens it. If you are already
 on the newest build it says so and changes nothing. Use `--dry-run` to preview,
 `--yes` to skip the question, `--version <tag>` for a specific build, `status`
 to see versions and backups, and `--help` for everything else. Stop a separately
-running service through its normal service controls first.
+running service through its normal service controls first. Started from Tx
+Code's integrated terminal, it offers to continue in a new Terminal window,
+because quitting the app would stop it.
 
 Each backup holds the databases, settings, secrets, keybindings, attachments,
 the desktop app's local storage, and the previous app. Worktrees, logs, caches
@@ -29,8 +31,13 @@ kept; an incomplete backup from an interrupted run is removed on the next run.
 
 `rollback` restores an earlier backup's app and data. It backs up the current
 state first, so you can undo a rollback by rolling back to that new backup.
-Tx Code stays closed afterwards; worktree files keep their current contents, and
-conversations newer than the backup are only in the safety backup.
+The restored settings turn automatic worktree cleanup off, including project
+overrides, until you re-enable it. If the backup has enabled schedules or
+pending work, rollback lists them and asks you to confirm separately; `--yes`
+does not cover this, so non-interactive runs need `--accept-pending`. Tx Code
+stays closed afterwards so you can reconcile worktrees, schedules and pending
+work first. Worktree files keep their current contents, and conversations newer
+than the backup are only in the safety backup.
 
 Backups made by older versions of the updater cannot be restored by it. Run
 `prune-legacy` to see their sizes and delete them.

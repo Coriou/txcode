@@ -54,7 +54,10 @@ case $name in
         printf '20261030T06%02d%02dZ\n' $((n / 60)) $((n % 60)) ;;
       *) echo 2026-10-30T06:00:00Z ;;
     esac ;;
-  osascript) if [ "\${FIXTURE_QUITS:-}" = 1 ]; then : > "$TXCODE_UPDATE_PS"; fi ;;
+  osascript)
+    for arg; do printf '%s\\n' "$arg"; done >> "$TXCODE_UPDATE_FIXTURE_ROOT/osascript-args"
+    if [ "\${FIXTURE_QUITS:-}" = 1 ]; then : > "$TXCODE_UPDATE_PS"; fi
+    exit "\${FIXTURE_OSASCRIPT_STATUS:-0}" ;;
   hdiutil)
     if [ "$1" = attach ]; then
       for arg; do image=$arg; done
@@ -241,10 +244,10 @@ async function fixture(
   if (!address || typeof address === "string") throw new Error("No fixture listener");
   const origin = `http://127.0.0.1:${address.port}`;
   const source = await NodeFSP.readFile(updater, "utf8");
-  await NodeFSP.writeFile(
-    at("update.sh"),
-    source.replace(/https:\/\/(api\.)?github\.com/g, origin),
-  );
+  // Quotes and spaces in the script path exercise the Terminal handoff quoting.
+  const script = at(`odd "dir" it's`, "update.sh");
+  await NodeFSP.mkdir(NodePath.dirname(script));
+  await NodeFSP.writeFile(script, source.replace(/https:\/\/(api\.)?github\.com/g, origin));
 
   const run = (
     args: string[],
@@ -252,8 +255,8 @@ async function fixture(
   ) =>
     new Promise<RunResult>((resolve, reject) => {
       const command = answers
-        ? ["python3", [at("terminal.py"), "/bin/bash", at("update.sh"), ...args]]
-        : ["/bin/bash", [at("update.sh"), ...args]];
+        ? ["python3", [at("terminal.py"), "/bin/bash", script, ...args]]
+        : ["/bin/bash", [script, ...args]];
       const child = NodeChildProcess.spawn(command[0] as string, command[1] as string[], {
         env: {
           ...process.env,
@@ -289,6 +292,7 @@ async function fixture(
 
   return {
     root,
+    script,
     apps,
     backups,
     userdata,
@@ -314,6 +318,7 @@ async function fixture(
         withApp?: boolean;
         complete?: boolean;
         settings?: string;
+        pending?: boolean;
       } = {},
     ) {
       const dir = NodePath.join(backups, id);
@@ -330,7 +335,14 @@ async function fixture(
         backup.settings ?? "{}",
       );
       await NodeFSP.writeFile(NodePath.join(dir, "desktop/Local Storage/data"), "old desktop");
-      writeDatabase(NodePath.join(dir, "userdata/statev2.sqlite"), 3).close();
+      const db = writeDatabase(NodePath.join(dir, "userdata/statev2.sqlite"), 3);
+      if (backup.pending) {
+        db.exec(`CREATE TABLE scheduled_tasks (title TEXT, enabled INTEGER);
+          INSERT INTO scheduled_tasks VALUES ('Nightly build', 1), ('Paused', 0);
+          CREATE TABLE orchestration_v2_effect_outbox (effect_type TEXT, status TEXT);
+          INSERT INTO orchestration_v2_effect_outbox VALUES ('provider.turn.start', 'pending'), ('x', 'running'), ('y', 'succeeded');`);
+      }
+      db.close();
       if (backup.withApp ?? true)
         await writeApp(NodePath.join(dir, "app", appName), version, "backup app");
       if (backup.complete ?? true) await NodeFSP.writeFile(NodePath.join(dir, "complete"), "");
@@ -594,7 +606,14 @@ it("rolls back app and data, backs up the current state first, keeps its source,
   });
   fx.closeDatabases();
   const source = "20261001T000000Z";
-  await fx.makeBackup(source, { settings: '{"generation":"old"}' });
+  const oldSettings = {
+    generation: "old",
+    worktreeOnDelete: true,
+    worktreeAfterDays: 7,
+    worktreeCleanup: { mode: "custom", rules: { worktreeOnDelete: true } },
+    projectSettingsOverrides: { "project.with.dots": { worktreeCleanup: { mode: "custom" } } },
+  };
+  await fx.makeBackup(source, { settings: JSON.stringify(oldSettings) });
   for (const id of ["20261002T000000Z", "20261003T000000Z", "20261004T000000Z"]) {
     await fx.makeBackup(id, { version: latest });
   }
@@ -603,8 +622,28 @@ it("rolls back app and data, backs up the current state first, keeps its source,
   const result = await fx.run(["rollback", source, "--yes"]);
   expect(result.code, result.output).toBe(0);
   expect(result.output).toContain(`Rolled back to ${older}`);
+  expect(result.output).toContain("Automatic worktree cleanup is off until you re-enable it");
+  expect(result.output).not.toContain("Pending");
   expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("backup app");
-  expect(await fx.read(NodePath.join(fx.userdata, "settings.json"))).toBe('{"generation":"old"}');
+  expect(JSON.parse(await fx.read(NodePath.join(fx.userdata, "settings.json")))).toEqual({
+    generation: "old",
+    continueThreadsAfterServerUpdate: false,
+    worktreeCleanup: { mode: "off" },
+    worktreeAfterDays: null,
+    worktreeSettledAfterDays: null,
+    worktreeOnMerge: false,
+    worktreeOnDelete: false,
+    worktreeUnchanged: false,
+    projectSettingsOverrides: {
+      "project.with.dots": {
+        continueThreadsAfterServerUpdate: false,
+        worktreeCleanup: { mode: "off" },
+      },
+    },
+  });
+  expect(await fx.read(NodePath.join(fx.backups, source, "userdata/settings.json"))).toBe(
+    JSON.stringify(oldSettings),
+  );
   expect(await fx.exists(NodePath.join(fx.userdata, "statev2.sqlite-wal"))).toBe(false);
   expect(countRows(NodePath.join(fx.userdata, "statev2.sqlite"))).toBe(3);
   expect(await fx.read(NodePath.join(fx.desktop, "Local Storage/data"))).toBe("old desktop");
@@ -625,10 +664,83 @@ it("rolls back app and data, backs up the current state first, keeps its source,
   const undo = await fx.run(["rollback", quarantine, "--yes"]);
   expect(undo.code, undo.output).toBe(0);
   expect(await fx.read(NodePath.join(fx.apps, "Tx Code.app/Contents/marker"))).toBe("current app");
-  expect(await fx.read(NodePath.join(fx.userdata, "settings.json"))).toBe(
-    '{"generation":"current"}',
-  );
+  expect(JSON.parse(await fx.read(NodePath.join(fx.userdata, "settings.json")))).toMatchObject({
+    generation: "current",
+    worktreeCleanup: { mode: "off" },
+  });
   expect(countRows(NodePath.join(fx.userdata, "statev2.sqlite"))).toBe(4000);
+});
+
+it("warns about enabled schedules and pending work and needs a confirmation --yes cannot give", async () => {
+  await using fx = await fixture({
+    installed: "Tx Code.app",
+    installedVersion: latest,
+    state: true,
+  });
+  fx.closeDatabases();
+  const source = "20261001T000000Z";
+  await fx.makeBackup(source, { pending: true, settings: '{"generation":"old"}' });
+  const unchanged = async () => {
+    expect(JSON.parse(await fx.read(NodePath.join(fx.userdata, "settings.json"))).generation).toBe(
+      "current",
+    );
+    expect(await fx.backupIds()).toEqual([source]);
+  };
+
+  const refused = await fx.run(["rollback", source, "--yes"]);
+  expect(refused.code, refused.output).toBe(6);
+  expect(refused.output).toContain("--accept-pending");
+  expect(refused.output).toContain("1 enabled schedule(s)\n      Nightly build\n");
+  expect(refused.output).toContain("2 pending or running effect(s)");
+  await unchanged();
+
+  const declined = await fx.run(["rollback", source, "--yes"], { answers: ["n"] });
+  expect(declined.code, declined.output).toBe(3);
+  expect(declined.output).toContain("Roll back anyway?");
+  await unchanged();
+
+  const accepted = await fx.run(["rollback", source, "--yes", "--accept-pending"]);
+  expect(accepted.code, accepted.output).toBe(0);
+  expect(accepted.output).toContain("Before opening Tx Code, review the restored schedules");
+  expect(JSON.parse(await fx.read(NodePath.join(fx.userdata, "settings.json"))).generation).toBe(
+    "old",
+  );
+});
+
+it("hands off to Terminal instead of mutating when run inside Tx Code", async () => {
+  await using fx = await fixture({ installed: "Tx Code.app" });
+  const ancestry = NodePath.join(fx.root, "ancestry");
+  await NodeFSP.writeFile(
+    ancestry,
+    `100 50 -zsh\n50 40 ${fx.apps}/Tx Code.app/Contents/Frameworks/Tx Code Helper.app/Contents/MacOS/Tx Code Helper --type=pty\n40 1 ${fx.apps}/Tx Code.app/Contents/MacOS/Tx Code\n`,
+  );
+  const env = { TXCODE_UPDATE_ANCESTRY: ancestry, TXCODE_UPDATE_START_PID: "100" };
+
+  const preview = await fx.run(["--dry-run"], { env });
+  expect(preview.code, preview.output).toBe(0);
+  const status = await fx.run(["status"], { env });
+  expect(status.code, status.output).toBe(0);
+
+  const handed = await fx.run(["--yes", "--version", `v${latest}`], { env });
+  expect(handed.code, handed.output).toBe(0);
+  expect(handed.output).toContain("Opened Terminal");
+  const script = (await fx.read(NodePath.join(fx.root, "osascript-args")))
+    .split("\n")
+    .find((line) => line.startsWith('tell application "Terminal" to do script '))!;
+  const command = JSON.parse(script.slice('tell application "Terminal" to do script '.length));
+  const words = NodeChildProcess.execFileSync(
+    "/bin/bash",
+    ["-c", 'eval "words=($1)"; printf "%s\\n" "${words[@]}"', "_", command],
+    { encoding: "utf8" },
+  );
+  expect(words).toBe(["/bin/bash", fx.script, "--yes", "--version", `v${latest}`, ""].join("\n"));
+
+  const failed = await fx.run(["--yes"], { env: { ...env, FIXTURE_OSASCRIPT_STATUS: "1" } });
+  expect(failed.code, failed.output).toBe(4);
+  expect(failed.output).toContain("Run this from Terminal instead: /bin/bash ");
+  expect(fx.requests).toEqual(["/repos/Coriou/txcode/releases", "/repos/Coriou/txcode/releases"]);
+  expect(await fx.backupIds()).toEqual([]);
+  expect(await fx.exists(NodePath.join(fx.backups, ".updater-lock"))).toBe(false);
 });
 
 it("refuses to roll back data-only backups onto a different app version", async () => {

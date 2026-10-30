@@ -20,6 +20,7 @@ Options:
   -n, --dry-run   Show what would happen without changing anything.
   --version TAG   Install this release tag instead of the newest nightly.
   --force         Reinstall even when already up to date.
+  --accept-pending  Roll back even if the backup has enabled schedules or pending work.
   -h, --help      Show this help.
 
 Backups live in ~/Library/Application Support/txcode-desktop-backups; the newest 3
@@ -60,7 +61,10 @@ die() {
   exit "$code"
 }
 
-command=update yes=0 dry_run=0 force=0 want_tag='' rollback_id='' command_given=0
+command=update yes=0 dry_run=0 force=0 accept_pending=0 want_tag='' rollback_id='' command_given=0
+script_path="$(cd "$(dirname "$0")" && pwd -P)/${0##*/}"
+invocation="/bin/bash $(printf '%q' "$script_path")"
+for arg in "$@"; do invocation+=" $(printf '%q' "$arg")"; done
 is_id() { [[ $1 =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; }
 while [ $# -gt 0 ]; do
   case $1 in
@@ -71,6 +75,7 @@ while [ $# -gt 0 ]; do
     -y | --yes) yes=1 ;;
     -n | --dry-run) dry_run=1 ;;
     --force) force=1 ;;
+    --accept-pending) accept_pending=1 ;;
     --version)
       [ $# -ge 2 ] || die $E_USAGE '--version needs a release tag, for example v0.1.6-nightly.20261030.3919.'
       want_tag=$2
@@ -108,7 +113,7 @@ apps=/Applications
 root="$HOME/Library/Application Support/txcode-desktop-backups"
 data1="$HOME/.txcode"
 data2="$HOME/Library/Application Support/txcode-v2"
-process_file='' clone_override='' quit_timeout=30
+process_file='' clone_override='' quit_timeout=30 ancestry_file='' start_pid=$PPID
 if [ "${TXCODE_UPDATE_FIXTURE:-}" = 1 ]; then
   sandbox=${TXCODE_UPDATE_FIXTURE_ROOT:?Fixture root required}
   [ -d "$sandbox" ] && [ ! -L "$sandbox" ] || die $E_FAIL 'Invalid fixture root.'
@@ -126,6 +131,8 @@ if [ "${TXCODE_UPDATE_FIXTURE:-}" = 1 ]; then
   api=${TXCODE_UPDATE_API:-$api}
   clone_override=${TXCODE_UPDATE_CLONE:-}
   quit_timeout=${TXCODE_UPDATE_QUIT_TIMEOUT:-$quit_timeout}
+  ancestry_file=${TXCODE_UPDATE_ANCESTRY:-/dev/null}
+  start_pid=${TXCODE_UPDATE_START_PID:-$PPID}
 fi
 
 mutating=0
@@ -194,14 +201,48 @@ ask() {
 }
 
 # The bundled server keeps running after the window closes, so match every process in the bundle.
-app_processes() {
-  local listing
-  if [ -n "$process_file" ]; then listing=$(cat "$process_file"); else listing=$(ps -axww -o command=); fi
-  printf '%s\n' "$listing" | awk -v a="$apps/Tx Code.app/" -v b="$apps/Tx Code (Nightly).app/" \
+app_commands() {
+  awk -v a="$apps/Tx Code.app/" -v b="$apps/Tx Code (Nightly).app/" \
     -v c="$apps/Tx Code.app.aside/" -v d="$apps/Tx Code (Nightly).app.aside/" -v e="$apps/.txcode-update." '
     { sub(/^[ \t]+/, ""); if (index($0, a) == 1 || index($0, b) == 1 || index($0, c) == 1 || index($0, d) == 1 || index($0, e) == 1) print }'
 }
+app_processes() {
+  if [ -n "$process_file" ]; then app_commands <"$process_file"; else ps -axww -o command= | app_commands; fi
+}
 is_running() { [ -n "$(app_processes)" ]; }
+# Prints "<ppid> <command>" for one process.
+process_parent() {
+  if [ -n "$ancestry_file" ]; then
+    awk -v p="$1" '$1 == p { sub(/^[0-9]+ /, ""); print; exit }' "$ancestry_file"
+  else
+    ps -o ppid=,command= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//'
+  fi
+}
+# True in Tx Code's integrated terminal, where quitting the app would kill this script mid-update.
+inside_app() {
+  local pid=$start_pid line hops=0
+  while [[ $pid =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] && [ "$hops" -lt 64 ]; do
+    line=$(process_parent "$pid")
+    [ -n "$line" ] || return 1
+    if [ -n "$(printf '%s\n' "${line#* }" | app_commands)" ]; then return 0; fi
+    pid=${line%% *}
+    hops=$((hops + 1))
+  done
+  return 1
+}
+hand_off_to_terminal() {
+  local script
+  warn 'This is running inside Tx Code, which the update has to quit.'
+  if ask 'Open Terminal and continue there?' y; then
+    script=${invocation//\\/\\\\}
+    script=${script//\"/\\\"}
+    if osascript -e "tell application \"Terminal\" to do script \"$script\"" -e 'tell application "Terminal" to activate' >/dev/null 2>&1; then
+      success 'Opened Terminal; continue there.'
+      exit 0
+    fi
+  fi
+  die $E_RUNNING "Not started. Run this from Terminal instead: $invocation"
+}
 ensure_stopped() {
   if launchctl list | awk '$3 == "net.coriou.txcode.service" && $1 ~ /^[0-9]+$/ { f = 1 } END { exit !f }'; then
     die $E_RUNNING 'The Tx Code background service (net.coriou.txcode.service) is running. Stop it, then run this again.'
@@ -367,6 +408,47 @@ restore_data() {
   for name in "${desktop_entries[@]}"; do
     rm -rf "${data2:?}/$name"
     [ ! -e "$from/desktop/$name" ] || copy "$from/desktop/$name" "$data2/$name"
+  done
+}
+# Restored data is older than the worktrees on disk, so the older app must not clean them up.
+rollback_settings() {
+  local jq_bin
+  jq_bin=$(command -v jq || true)
+  [ -n "$jq_bin" ] || die $E_FAIL 'Rollback needs jq (built into macOS 15 and later) to turn off worktree cleanup. Nothing was changed.'
+  { if [ -f "$1" ]; then cat "$1"; else echo '{}'; fi; } | "$jq_bin" '
+    def cleanup_off: . + {continueThreadsAfterServerUpdate: false, worktreeCleanup: {mode: "off"}};
+    if type != "object" then error("not an object") else . end
+    | cleanup_off
+    | . + {worktreeAfterDays: null, worktreeSettledAfterDays: null, worktreeOnMerge: false, worktreeOnDelete: false, worktreeUnchanged: false}
+    | .projectSettingsOverrides = ((.projectSettingsOverrides // {})
+      | if type != "object" then error("invalid overrides") else . end
+      | map_values(if type != "object" then error("invalid override") else cleanup_off end))
+  ' >"$2" 2>/dev/null || die $E_SAFETY "The settings.json in backup $rollback_id is not valid, so worktree cleanup cannot be turned off. Nothing was changed."
+}
+snapshot_rows() {
+  sqlite3 -readonly "file:$(printf '%s' "$1" | sed 's/%/%25/g; s/ /%20/g; s/?/%3f/g; s/#/%23/g')?immutable=1" "$2" 2>/dev/null
+}
+# Prints "<count> <label>" when a backup table has rows matching the predicate.
+pending_count() {
+  local count
+  [ -n "$(snapshot_rows "$1" "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '$2'")" ] || return 0
+  count=$(snapshot_rows "$1" "SELECT count(*) FROM $2 WHERE $3") || count=''
+  if ! [[ $count =~ ^[0-9]+$ ]]; then
+    printf '%s: could not be read\n' "$4"
+  elif [ "$count" != 0 ]; then
+    printf '%s %s\n' "$count" "$4"
+  fi
+}
+# Work the restored database would run again when Tx Code opens.
+pending_work() {
+  local name db names
+  for name in "${databases[@]}"; do
+    db="$1/userdata/$name"
+    [ -f "$db" ] || continue
+    pending_count "$db" scheduled_tasks 'enabled != 0' 'enabled schedule(s)'
+    names=$(snapshot_rows "$db" "SELECT group_concat(title, ', ') FROM (SELECT title FROM scheduled_tasks WHERE enabled != 0 ORDER BY title LIMIT 5)" || true)
+    [ -z "$names" ] || printf '  %s\n' "$names"
+    pending_count "$db" orchestration_v2_effect_outbox "status IN ('pending', 'running')" 'pending or running effect(s)'
   done
 }
 # Moves $stage into place and the previous app into the backup. Renames only; nothing is copied.
@@ -606,7 +688,7 @@ run_status() {
 }
 
 run_rollback() {
-  local ids count choice source_dir target_name target_version has_app=0 index=0 id app_kb
+  local ids count choice source_dir target_name target_version has_app=0 index=0 id app_kb pending line
   if [ "$mutating" = 1 ]; then
     take_lock
     recover_leftovers
@@ -637,15 +719,29 @@ run_rollback() {
     die $E_SAFETY "Backup $rollback_id holds data for app ${target_version:-none} but no app copy, and ${installed_version:-no app} is installed. Install that version first, then roll back."
   fi
   measure_backup
+  rollback_settings "$source_dir/userdata/settings.json" "$tmp/settings.json"
+  pending=$(pending_work "$source_dir")
   printf '%sTx Code rollback%s\n' "$c_bold" "$c_off"
   row Restore "backup $rollback_id: $([ "$has_app" = 1 ] && echo "app $target_version and its data" || echo 'data only')"
   row Current "${installed_version:-not installed}; backed up first so you can undo"
   row Backup "$(backup_label)"
+  row Cleanup 'automatic worktree cleanup will be turned off in the restored settings'
+  if [ -n "$pending" ]; then
+    row Pending 'this backup has work that runs again when Tx Code opens:'
+    while IFS= read -r line; do info "$line"; done <<<"$pending"
+  fi
   if [ "$dry_run" = 1 ]; then
     success 'Dry run: would quit Tx Code, back up the current state and restore that backup. Nothing was changed.'
     exit 0
   fi
   ask "Roll back to $target_version from $rollback_id?" n || die $E_CANCEL 'Cancelled. Nothing was changed.'
+  # --yes alone never accepts replaying schedules or effects.
+  if [ -n "$pending" ] && [ "$accept_pending" = 0 ]; then
+    [ -t 0 ] || die $E_SAFETY 'The backup has enabled schedules or pending work (listed above). Run in Terminal to confirm, or pass --accept-pending. Nothing was changed.'
+    printf '%s [y/N] ' 'Roll back anyway? The work listed above may run again when you open Tx Code.'
+    IFS= read -r line || line=''
+    [[ $line =~ ^[yY]([eE][sS])?$ ]] || die $E_CANCEL 'Cancelled. Nothing was changed.'
+  fi
   app_kb=0
   if [ "$has_app" = 1 ]; then app_kb=$(size_kb "$source_dir/app"); fi
   need_space "$root" $((backup_kb + app_kb)) 'the safety backup'
@@ -655,6 +751,8 @@ run_rollback() {
   printf '%s\t%s\n' "${backup##*/}" "$rollback_id" >"$root/.rollback-in-progress"
   step "Restoring data from $rollback_id"
   restore_data "$source_dir"
+  cp "$tmp/settings.json" "$data1/userdata/.settings.json.rollback"
+  mv "$data1/userdata/.settings.json.rollback" "$data1/userdata/settings.json"
   if [ "$has_app" = 1 ]; then
     step "Restoring app $target_version"
     stage="$apps/.txcode-update.${tmp##*/}.app"
@@ -665,7 +763,12 @@ run_rollback() {
   rm -f "$root/.rollback-in-progress"
   prune "$rollback_id"
   success "Rolled back to $target_version. The previous state is backup ${backup##*/}; roll back to it to undo."
-  info 'Tx Code was left closed. Open it when ready; worktree files were not changed.'
+  info 'Automatic worktree cleanup is off until you re-enable it in Settings; reconcile surviving worktrees first.'
+  if [ -n "$pending" ]; then
+    info 'Before opening Tx Code, review the restored schedules and pending work:'
+    while IFS= read -r line; do info "$line"; done <<<"$pending"
+  fi
+  info 'Tx Code was left closed. Reconcile worktrees, schedules and pending work, then open it; worktree files were not changed.'
 }
 
 run_prune_legacy() {
@@ -693,6 +796,7 @@ run_prune_legacy() {
   success "Deleted. Freed $(human_kb "$total")."
 }
 
+if [ "$mutating" = 1 ] && inside_app; then hand_off_to_terminal; fi
 case $command in
   update) run_update ;;
   status) run_status ;;
