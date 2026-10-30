@@ -292,12 +292,14 @@ export function decodeScanCache(
     }
     // Keep history for deleted rollouts, but re-parse incompatible reducer state.
     // v9 repairs skipped initial Codex requests; clean v8 entries can still resume.
-    // Fork-local: v10 rescans OMP history for standalone model_usage calls.
+    // v10 adds Claude advisor calls, which no older Claude entry holds.
+    // Fork-local: v10 also rescans OMP history for standalone model_usage calls.
     const legacy =
-      format.state !== undefined &&
-      (version < 6 ||
-        (entry.p === "omp" && version < 10) ||
-        (entry.p === "codex" && (version < 8 || (version < 9 && malformedRecords > 0))));
+      (entry.p === "claude" && version < 10) ||
+      (format.state !== undefined &&
+        (version < 6 ||
+          (entry.p === "omp" && version < 10) ||
+          (entry.p === "codex" && (version < 8 || (version < 9 && malformedRecords > 0)))));
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.
     if (!legacy && !isValidState.get(entry.p)?.(entry.cs)) continue;
