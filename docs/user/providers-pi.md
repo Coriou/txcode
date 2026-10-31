@@ -48,7 +48,7 @@ Pi skills appear in the composer's `$` menu. This includes user skills and proje
 loads for the current workspace; selecting one uses Pi's native skill expansion.
 
 Pi loads its normal user extensions, and project extensions once the folder is trusted in Pi.
-Blocking `select`, `confirm`, `input`, and `editor` dialogs work in T3 Code. Notifications appear in
+Blocking `select`, `confirm`, `input`, and `editor` dialogs work in Tx Code. Notifications appear in
 the work log. Pi terminal decoration such as titles, status lines, and widgets does not have a T3
 Code equivalent.
 

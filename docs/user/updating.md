@@ -203,7 +203,7 @@ its own npm, so the checks use npm's configured registry, authentication, and
 proxy settings. Providers installed with Homebrew or pnpm check through those
 tools.
 Configure npm on the server's machine. If that registry cannot be reached, the
-release shows as unavailable; T3 Code does not try the public registry instead.
+release shows as unavailable; Tx Code does not try the public registry instead.
 Machines without npm check the public npm registry directly.
 
 ## Update providers

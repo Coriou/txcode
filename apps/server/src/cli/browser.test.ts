@@ -117,7 +117,7 @@ it.effect("setup in a root shell warns that the server cannot run as root", () =
       Effect.provideService(HostProcess.Environment, { SUDO_USER: "root" }),
     );
     const output = (yield* TestConsole.logLines).join("\n");
-    expect(output).toContain("Chrome will not start its sandbox as root");
+    expect(output).toContain("T3 server is running as root");
     expect(output).not.toContain("ready");
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, TestConsole.layer))),
 );

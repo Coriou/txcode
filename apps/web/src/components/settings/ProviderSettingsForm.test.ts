@@ -74,6 +74,7 @@ describe("ProviderSettingsForm helpers", () => {
     expect(deriveProviderSettingsFields(omp!).map((field) => field.key)).toEqual([
       "binaryPath",
       "launchArgs",
+      "openrouterUpstreams",
     ]);
   });
 });

@@ -69,7 +69,7 @@ describe("collectServerUpdateTargets", () => {
       desktopUpdate: "manual",
     });
     const unknown = withPolicy("unknown", undefined);
-    const { targets, skipped } = collectServerUpdateTargets([fork, unknown], "0.0.50", true);
+    const { targets, skipped } = collectServerUpdateTargets([fork, unknown], "0.0.50");
     expect(targets).toEqual([]);
     expect(skipped).toEqual([]);
     const view = describeUpdateEverything({
@@ -100,7 +100,6 @@ describe("collectServerUpdateTargets", () => {
       collectServerUpdateTargets(
         [machine("upstream", "0.0.40", "boot-service"), fork, unknown],
         "0.0.50",
-        true,
       ).targets.map((target) => target.serverLabel),
     ).toEqual(["upstream"]);
   });
