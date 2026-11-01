@@ -90,9 +90,6 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
   readonly allowDowngrade?: boolean;
   readonly start?: boolean;
 }) {
-  if (destinationUpdatePolicy.serverUpdate === "manual") {
-    return yield* new BootService.BootServiceManualUpdateError({});
-  }
   const { baseDir } = yield* ServerConfig.ServerConfig;
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -219,6 +216,10 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
     runServiceCommand(
       flags,
       Effect.gen(function* () {
+        // Manual distributions refuse here, before reconcile's already-current shortcut. `t3 up` still aligns a current service.
+        if (destinationUpdatePolicy.serverUpdate === "manual") {
+          return yield* new BootService.BootServiceManualUpdateError({});
+        }
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
           yield* Console.log(
@@ -245,6 +246,9 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
         yield* Console.log(
           "`t3 service update` is deprecated: run `t3 update` to move to a newer release, or `t3 service install` to repair the service. Repairing now.",
         );
+        if (destinationUpdatePolicy.serverUpdate === "manual") {
+          return yield* new BootService.BootServiceManualUpdateError({});
+        }
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
           yield* Console.log(

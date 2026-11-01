@@ -261,7 +261,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(3);
         assert_eq!(
             next_event(&mut events, deadline).unwrap_err().to_string(),
-            "T3 Code did not become visible."
+            "Tx Code did not become visible."
         );
         hyprland.write_all(b"openwindow>>1,1,t3,T3 Code\n").unwrap();
         assert!(next_event(&mut events, deadline).is_ok());

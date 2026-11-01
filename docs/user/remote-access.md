@@ -17,7 +17,7 @@ t3 up
 
 It asks how your other devices reach the machine: T3 Connect, the local network,
 or both. Choose T3 Connect and follow the sign-in instructions. On Linux and
-macOS, it then runs T3 Code as a [background service](./background-service.md).
+macOS, it then runs Tx Code as a [background service](./background-service.md).
 `t3 connect` is the same as `t3 up --connect`. Run `t3 up` again to change your
 choice, and `t3 status` to see it.
 
@@ -78,7 +78,7 @@ For a command-line host, choose the local network in `t3 up`, or run:
 t3 up --lan
 ```
 
-For a server in a terminal, run `t3 serve --lan`. Either way, T3 Code then
+For a server in a terminal, run `t3 serve --lan`. Either way, Tx Code then
 accepts connections from your local network and tailnet, so a pairing code is
 all that keeps other devices on them out.
 
@@ -266,13 +266,13 @@ apps.
 ### Local servers
 
 The browser lists ports held by processes your terminals and agents started.
-T3 Code reads which process holds each port and never connects to it, so a
+Tx Code reads which process holds each port and never connects to it, so a
 listed port opens as `http://localhost:<port>` and might not be a web page. For
 an HTTPS server or a specific path, set the **Preview URL** on the project
-script that starts it; T3 Code checks that address and opens it as written.
+script that starts it; Tx Code checks that address and opens it as written.
 
 To stop listing ports, set `T3CODE_PORT_DISCOVERY=0` in the environment that
-starts the T3 Code server, such as
+starts the Tx Code server, such as
 [`service.env`](./background-service.md#configure-the-service-environment) for
 the background service, and restart it. Script preview URLs still appear.
 
