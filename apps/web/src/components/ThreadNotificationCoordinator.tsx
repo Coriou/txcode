@@ -380,7 +380,6 @@ export function startThreadNotifications(
           observeThreads(environmentId, entry, threads);
           return;
         }
-        entry.gate.cancelPending();
         entry.reconnecting = true;
       },
       { immediate: true },

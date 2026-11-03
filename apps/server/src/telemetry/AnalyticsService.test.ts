@@ -406,6 +406,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
               HttpClient.HttpClient,
               HttpClient.make(() => Effect.die("disabled analytics must not send")),
             ),
+            ManagedPolicy.layerTest(),
           ),
         ),
         Effect.provideService(HostProcess.Platform, "linux"),
@@ -444,6 +445,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
           Layer.mergeAll(
             Layer.succeed(HostProcess.Platform, "linux"),
             Layer.succeed(HostProcess.Architecture, "arm64"),
+            ManagedPolicy.layerTest(),
           ),
         ),
         Layer.provideMerge(NodeHttpServer.layerTest),

@@ -395,6 +395,7 @@ it.layer(NodeServices.layer)("fork CLI update", (it) => {
             HttpClient.make(() => Effect.die("unexpected discovery or download")),
           ),
           Effect.provideService(HostProcess.Environment, {}),
+          Effect.provide(ManagedPolicy.layerTest()),
           Effect.flip,
         );
         assert.include(error.message, "installed manually");

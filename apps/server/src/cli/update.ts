@@ -312,6 +312,16 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly allowDowngrade: boolean;
   readonly assumeYes: boolean;
 }) {
+  const policy = yield* ManagedPolicy.ManagedPolicy;
+  const currentVersion = packageJson.version;
+  const channel = input.channel ?? cliReleaseChannelOf(currentVersion);
+  const refusal = managedUpdateRefusal(
+    policy.document,
+    input.requestedVersion === undefined ? channel : cliReleaseChannelOf(input.requestedVersion),
+  );
+  if (refusal !== undefined) {
+    return yield* new CliUpdateError({ reason: refusal });
+  }
   if (destinationUpdatePolicy.serverUpdate === "manual") {
     return yield* new CliUpdateError({ reason: MANUAL_UPDATE_REASON });
   }
@@ -323,17 +333,6 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const environment = yield* HostProcess.Environment;
   const httpClient = yield* HttpClient.HttpClient;
   const service = yield* BootService.BootService;
-  const policy = yield* ManagedPolicy.ManagedPolicy;
-
-  const currentVersion = packageJson.version;
-  const channel = input.channel ?? cliReleaseChannelOf(currentVersion);
-  const refusal = managedUpdateRefusal(
-    policy.document,
-    input.requestedVersion === undefined ? channel : cliReleaseChannelOf(input.requestedVersion),
-  );
-  if (refusal !== undefined) {
-    return yield* new CliUpdateError({ reason: refusal });
-  }
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {
     return yield* new CliUpdateError({
       reason: `'${input.requestedVersion}' is not an exact t3 version.`,
