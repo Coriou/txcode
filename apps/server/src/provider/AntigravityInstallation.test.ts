@@ -128,6 +128,25 @@ interface HarnessOptions {
   readonly useDefaultValidation?: boolean;
 }
 
+// Windows PATH directories can be case-sensitive. Host stat folds `agy.CMD` onto `agy.cmd`.
+const caseSensitiveDirectoryFileSystem = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+): FileSystem.FileSystem =>
+  FileSystem.FileSystem.of({
+    ...fs,
+    stat: (filePath) =>
+      Effect.gen(function* () {
+        const parent = path.dirname(filePath);
+        const base = path.basename(filePath);
+        const entries = yield* fs.readDirectory(parent).pipe(Effect.option);
+        if (Option.isNone(entries) || entries.value.includes(base)) {
+          return yield* fs.stat(filePath);
+        }
+        return yield* fs.stat(path.join(parent, `${base}.case-miss`));
+      }),
+  });
+
 const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
   options: HarnessOptions = {},
 ) {
@@ -683,7 +702,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
           harnessPath: null,
         });
 
-        const { installation: windows } = yield* makeHarness({ baseDir, platform: "win32" });
+        const { installation: windows } = yield* makeHarness({
+          baseDir,
+          platform: "win32",
+          fileSystem: caseSensitiveDirectoryFileSystem(fs, path),
+        });
         for (const name of ["agy.EXE", "agy.cmd"]) {
           const windowsDirectory = path.join(baseDir, `windows-${name}`);
           yield* fs.makeDirectory(windowsDirectory);
