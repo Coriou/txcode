@@ -653,17 +653,6 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ),
   ).join(":");
 
-  const systemdUnitDir = platform === "linux" ? yield* readSystemdUnitDirectory() : undefined;
-  const detectedManager = selectBootServiceManager({
-    platform,
-    homeDir,
-    xdgConfigHome,
-    systemdUnitDir,
-    uid,
-    path,
-    environmentPath,
-  });
-  const unitPath = detectedManager?.unitPath ?? "";
   const logPath = path.join(input.logsDir, BOOT_SERVICE_LOG_FILE);
   const statePath = path.join(input.baseDir, "runtime", SERVICE_STATE_FILE);
   const restartPendingPath = path.join(input.baseDir, "runtime", SERVICE_RESTART_PENDING_FILE);
@@ -693,18 +682,48 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
         );
       }),
     ).pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
-  const plan: BootServicePlan = {
-    program: [runtimePaths.entryPath, "__service-launcher"],
-    baseDir: input.baseDir,
-    logPath,
-    unitPath,
-  };
-
-  const requireManager = Effect.suspend(() =>
-    detectedManager === undefined
-      ? new BootServiceUnsupportedError({ platform })
-      : Effect.succeed(detectedManager),
+  // Manual install returns before this. `busctl` is the manager lookup, and that
+  // distribution never installs, so construction must not probe. Later calls do
+  // not carry ProcessRunner, so the probe uses the runner captured here.
+  const resolvePlacement = yield* Effect.cached(
+    Effect.gen(function* () {
+      const systemdUnitDir =
+        platform === "linux"
+          ? yield* readSystemdUnitDirectory().pipe(
+              Effect.provideService(ProcessRunner.ProcessRunner, runner),
+              Effect.provideService(Path.Path, path),
+            )
+          : undefined;
+      const detectedManager = selectBootServiceManager({
+        platform,
+        homeDir,
+        xdgConfigHome,
+        systemdUnitDir,
+        uid,
+        path,
+        environmentPath,
+      });
+      const unitPath = detectedManager?.unitPath ?? "";
+      const plan: BootServicePlan = {
+        program: [runtimePaths.entryPath, "__service-launcher"],
+        baseDir: input.baseDir,
+        logPath,
+        unitPath,
+      };
+      return { detectedManager, unitPath, plan };
+    }),
   );
+  const requireManager = Effect.gen(function* () {
+    const placement = yield* resolvePlacement;
+    if (placement.detectedManager === undefined) {
+      return yield* new BootServiceUnsupportedError({ platform });
+    }
+    return {
+      manager: placement.detectedManager,
+      unitPath: placement.unitPath,
+      plan: placement.plan,
+    };
+  });
 
   const logFailure = (error: { readonly message: string }) =>
     DateTime.now.pipe(
@@ -818,7 +837,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     if (destinationUpdatePolicy.serverUpdate === "manual") {
       return yield* new BootServiceManualUpdateError({});
     }
-    const manager = yield* requireManager;
+    const { manager, unitPath, plan } = yield* requireManager;
     // The unit is per user. Rewriting one that serves another home moves the
     // service onto this home's data, which looks like every thread vanished.
     const existingUnit = yield* fs.readFileString(unitPath).pipe(Effect.option);
@@ -983,7 +1002,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   });
 
   const restart: BootService["Service"]["restart"] = Effect.gen(function* () {
-    const manager = yield* requireManager;
+    const { manager, unitPath } = yield* requireManager;
     const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
     if (Option.isNone(unit)) return "skipped" as const;
     const installedBaseDir = bootServiceBaseDirOf(unit.value);
@@ -1015,8 +1034,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const withStopped = Effect.fn("cloud.boot_service.with_stopped")(function* <A, E, R>(
     operation: Effect.Effect<A, E, R>,
   ): Effect.fn.Return<A, E | BootServiceError, R> {
-    if (detectedManager === undefined) return yield* operation;
-    const manager = detectedManager;
+    const placement = yield* resolvePlacement;
+    if (placement.detectedManager === undefined) return yield* operation;
+    const manager = placement.detectedManager;
+    const { unitPath } = placement;
     const unit = yield* fs.readFileString(unitPath).pipe(Effect.option);
     if (Option.isNone(unit)) return yield* operation;
     const installedBaseDir = bootServiceBaseDirOf(unit.value);
@@ -1062,7 +1083,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   });
 
   const uninstall: BootService["Service"]["uninstall"] = Effect.gen(function* () {
-    const manager = yield* requireManager;
+    const { manager, unitPath } = yield* requireManager;
     if (
       !(yield* fs
         .exists(unitPath)
@@ -1078,6 +1099,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   }).pipe(Effect.withSpan("cloud.boot_service.uninstall"));
 
   const status: BootService["Service"]["status"] = Effect.gen(function* () {
+    const { detectedManager, unitPath, plan } = yield* resolvePlacement;
     if (detectedManager === undefined) {
       return { supported: false, installed: false, current: false, unitPath, logPath };
     }

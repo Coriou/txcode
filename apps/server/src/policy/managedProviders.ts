@@ -2,6 +2,7 @@ import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
+  OmpSettings,
   defaultInstanceIdForDriver,
   disallowedProviderMessage,
   type ManagedProviderInstance,
@@ -72,6 +73,8 @@ const KNOWN_DRIVERS: ReadonlyMap<ProviderDriverKind, KnownDriver> = new Map([
   known("codex", "Codex", CodexSettings),
   known("claudeAgent", "Claude", ClaudeSettings),
   known("antigravity", "Antigravity", AntigravitySettings),
+  // Built in, and off until a user enables it. Known-driver checks are separate from that default.
+  known("omp", "Oh My Pi", OmpSettings),
   ...PACKAGED_CLIENTS.map((client) =>
     known(client.driverKind, client.label, client.settingsSchema, client.hasDefaultInstance),
   ),

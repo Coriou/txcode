@@ -56,11 +56,23 @@ export function materializeReplayTranscriptRuntimeInstructions(
           lastPart.type === "text" &&
           "text" in lastPart &&
           typeof lastPart.text === "string" &&
-          // A recording that switched models mid-thread already carries the
-          // instructions for the model each prompt ran on.
           (lastPart.text === instructions || lastPart.text.startsWith("<runtime_info>"))
         ) {
-          return entry;
+          // The recorded block already names the model that prompt ran on.
+          // Align only the product name; leave the model and later sections.
+          const text = alignRecordedRuntimeProduct(lastPart.text, instructions);
+          return text === lastPart.text
+            ? entry
+            : {
+                ...entry,
+                frame: {
+                  ...frame,
+                  params: {
+                    ...frame.params,
+                    prompt: [...prompt.slice(0, -1), { ...lastPart, text }],
+                  },
+                },
+              };
         }
         return {
           ...entry,
@@ -73,4 +85,24 @@ export function materializeReplayTranscriptRuntimeInstructions(
       return entry;
     }),
   };
+}
+
+// Recorded model-switch prompts name the model that ran. Only the product name
+// follows the current build; headings outside runtime_info stay as recorded.
+function alignRecordedRuntimeProduct(text: string, instructions: string): string {
+  const product = /you are running in (.+?) through the /.exec(instructions)?.[1];
+  if (product === undefined || !text.startsWith("<runtime_info>")) return text;
+  const end = text.indexOf("</runtime_info>");
+  if (end < 0) return text;
+  const head = text.slice(0, end);
+  const tail = text.slice(end);
+  return (
+    head
+      .replace(
+        /you are running in .+? through the /,
+        () => `you are running in ${product} through the `,
+      )
+      .replace(/open it in .+?'s files viewer\./, () => `open it in ${product}'s files viewer.`) +
+    tail
+  );
 }

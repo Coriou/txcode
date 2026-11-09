@@ -13,7 +13,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as TestConsole from "effect/testing/TestConsole";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { afterEach, vi } from "vite-plus/test";
+import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
@@ -27,6 +27,20 @@ import {
   resolveNewestVersion,
   runUpdate,
 } from "./update.ts";
+
+const policy = vi.hoisted(() => ({
+  distribution: "txcode",
+  serverUpdate: "manual" as "manual" | "supported",
+  desktopUpdate: "manual" as "manual" | "supported",
+}));
+vi.mock("../forkUpdatePolicy.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../forkUpdatePolicy.ts")>()),
+  destinationUpdatePolicy: policy,
+}));
+beforeEach(() => {
+  policy.serverUpdate = "manual";
+  policy.desktopUpdate = "manual";
+});
 
 // lsof listing one process, so prune sees a process list in which no runtime is running.
 const unrelatedLsof = ProcessRunner.ProcessRunner.of({
@@ -175,6 +189,7 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
 
   it.effect("looks for updates on the policy's mirror, never the public releases", () =>
     Effect.gen(function* () {
+      policy.serverUpdate = "supported";
       const requested: string[] = [];
       const error = yield* runWithPolicy(
         { mode: "auto", feedUrl: "https://updates.example.com/t3code" },
@@ -459,6 +474,7 @@ const withoutTerminals = Effect.acquireRelease(
 it.layer(NodeServices.layer)("t3 update with a background service", (it) => {
   it.effect("names the version a service with a pending restart still runs", () =>
     Effect.gen(function* () {
+      policy.serverUpdate = "supported";
       yield* withoutTerminals;
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;

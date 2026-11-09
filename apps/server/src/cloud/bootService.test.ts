@@ -407,7 +407,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           : path.join(home, ".config"),
         "systemd",
         "user",
-        "t3code.service",
+        BootService.BOOT_SERVICE_UNIT_FILE,
       );
       expect(yield* service.status).toMatchObject({ installed: false, unitPath });
       const plan = yield* service.install();
@@ -710,7 +710,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const other = yield* makeService(undefined, "1.2.3", otherHome);
       commands.length = 0;
       expect(yield* other.withStopped(Effect.sync(() => control.active))).toBe(true);
-      expect(commands).toEqual([]);
+      expect(commands).toEqual([
+        "busctl --user --json=short get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager UnitPath",
+      ]);
     }),
   );
 
@@ -730,7 +732,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       // The CLI prints a user message without a stack trace.
       expect(CliError.getUserMessage(refused)).toBe(refused.message);
       expect(yield* fs.readFileString(plan.unitPath)).toBe(unit);
-      expect(commands).toEqual([]);
+      expect(commands).toEqual([
+        "busctl --user --json=short get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager UnitPath",
+      ]);
       expect((yield* other.status).otherBaseDir).toBe(baseDir);
     }),
   );
@@ -800,7 +804,10 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
         const error = yield* inside.restart.pipe(Effect.flip);
         expect(error).toMatchObject({ _tag: "BootServiceCommandError", exitCode: 1 });
-        expect(commands).toEqual(["systemctl --user daemon-reload"]);
+        expect(commands).toEqual([
+          "busctl --user --json=short get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager UnitPath",
+          "systemctl --user daemon-reload",
+        ]);
         expect(control.active).toBe(true);
 
         control.failCommand = undefined;
