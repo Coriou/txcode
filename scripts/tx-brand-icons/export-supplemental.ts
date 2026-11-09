@@ -48,3 +48,24 @@ for (const [sourcePath, destination] of [
     .webp({ quality: 90, alphaQuality: 100 })
     .toFile(new URL(destination, root).pathname);
 }
+
+// Derive PWA sizes from the existing native Tx exports when Icon Composer is unavailable.
+for (const [sourcePath, prefix] of [
+  ["assets/dev/blueprint-ios-1024.png", "assets/dev/blueprint-web-icon"],
+  ["assets/nightly/nightly-ios-1024.png", "assets/nightly/nightly-web-icon"],
+  ["assets/prod/black-ios-1024.png", "assets/prod/t3-black-web-icon"],
+] as const) {
+  for (const size of [192, 512]) {
+    const destination = new URL(`${prefix}-${size}x${size}.png`, root);
+    await sharp(new URL(sourcePath, root).pathname)
+      .resize(size, size)
+      .png()
+      .toFile(destination.pathname);
+    if (prefix.startsWith("assets/dev/")) {
+      await NodeFSP.copyFile(
+        destination,
+        new URL(`apps/web/public/icon-${size}x${size}.png`, root),
+      );
+    }
+  }
+}

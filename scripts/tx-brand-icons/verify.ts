@@ -57,7 +57,11 @@ for (const path of files) {
               ? 32
               : path.includes("apple-touch")
                 ? 180
-                : 1024;
+                : path.includes("192x192")
+                  ? 192
+                  : path.includes("512x512")
+                    ? 512
+                    : 1024;
     const image = sharp(contents);
     const metadata = await image.metadata();
     if (metadata.width !== expected || metadata.height !== expected) {
