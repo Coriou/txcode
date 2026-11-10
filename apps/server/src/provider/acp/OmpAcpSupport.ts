@@ -6,7 +6,7 @@ import {
   type RuntimeMode,
   type OrchestrationV2UserInputQuestion,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
@@ -518,7 +518,7 @@ const makeOmpAcpRuntimeWithSpawn = Effect.fn("OmpAcp.makeRuntime")(function* (
 ): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
+  SecureRandom.SecureRandom | Scope.Scope
 > {
   const acpContext = yield* Layer.build(
     AcpSessionRuntime.layer({
@@ -542,7 +542,7 @@ export const makeOmpAcpRuntime = (
 ): Effect.Effect<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
+  SecureRandom.SecureRandom | Scope.Scope
 > =>
   makeOmpAcpRuntimeWithSpawn(
     input,
@@ -560,7 +560,7 @@ export const makeOmpTextGenerationAcpRuntime = (
 ): Effect.Effect<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
+  SecureRandom.SecureRandom | Scope.Scope
 > =>
   makeOmpAcpRuntimeWithSpawn(
     input,

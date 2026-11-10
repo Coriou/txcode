@@ -120,7 +120,7 @@ const makeHarness = Effect.fn("test.make_desktop_app_update_harness")(function* 
   return { service };
 });
 
-it.layer(NodeServices.layer)("desktop app update", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("desktop app update", (it) => {
   it.effect("refuses fork preparation and commit even with a desktop control fd", () =>
     Effect.gen(function* () {
       policy.desktopUpdate = "manual";

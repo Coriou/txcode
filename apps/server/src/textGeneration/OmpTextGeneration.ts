@@ -1,4 +1,4 @@
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -31,7 +31,7 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
   ompSettings: OmpSettings,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
   const serverConfig = yield* ServerConfig;
@@ -81,7 +81,7 @@ export const makeOmpTextGeneration = Effect.fn("makeOmpTextGeneration")(function
         sessionDir,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
         ...(upstream === undefined ? {} : { openRouterRouting }),
-      }).pipe(Effect.provideService(Crypto.Crypto, crypto));
+      }).pipe(Effect.provideService(SecureRandom.SecureRandom, random));
 
       yield* runtime.handleSessionUpdate((notification) => {
         const update = notification.update;

@@ -145,7 +145,7 @@ export const makeAcpMcpOverAcpBridge = Effect.fn("AcpMcpOverAcpBridge.make")(fun
             () => response.body?.cancel().catch(() => undefined) ?? Promise.resolve(),
           );
           return yield* new AcpMcpOverAcpError({
-            message: `T3 Code MCP endpoint responded with HTTP ${response.status}.`,
+            message: `Tx Code MCP endpoint responded with HTTP ${response.status}.`,
           });
         }
         const payloads = [...(yield* Stream.runCollect(responsePayloads(response, bridgeError)))];

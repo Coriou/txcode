@@ -6,9 +6,9 @@ check which providers and models are available. This covers Claude Code or
 Codex in your own terminal, ChatGPT, and bots that support MCP. Each agent signs
 in once, and you choose what it may do.
 
-## Add T3 Code to an assistant app
+## Add Tx Code to an assistant app
 
-Open the command palette (`Cmd/Ctrl+K`) and choose **Use T3 Code in another
+Open the command palette (`Cmd/Ctrl+K`) and choose **Use Tx Code in another
 app (MCP)**, or use the button in **Settings → Sharing & access**. Pick the
 app and follow the step for that app. Assistants like
 Poke and Claude run in the cloud, so the wizard first asks you to sign in to T3
@@ -53,7 +53,7 @@ device is connected over, so an agent on the same device can reach it.
 ## Approve a sign-in
 
 The first time an agent connects, it opens a sign-in page. When the agent
-reaches the environment through T3 Connect, the page opens on the T3 Code web
+reaches the environment through T3 Connect, the page opens on the Tx Code web
 app: sign in with the T3 Connect account the environment is linked to and
 approve there, without a code. Otherwise the page opens on the environment.
 Either page names the agent and where its access goes:
@@ -64,12 +64,12 @@ Either page names the agent and where its access goes:
   Anyone who runs that service gets the access.
 
 Only approve a sign-in you just started. On the environment's own page, enter a
-code from **Use T3 Code in another app (MCP)**, **Settings → Sharing & access**,
+code from **Use Tx Code in another app (MCP)**, **Settings → Sharing & access**,
 or `t3 auth pairing create` on the host. A browser already signed in to the
 environment with permission to manage access can approve without a code. On the
 web app, **Use a sign-in code instead** opens the environment's own page.
 
-A code from **Use T3 Code in another app (MCP)** already carries the level you
+A code from **Use Tx Code in another app (MCP)** already carries the level you
 picked there. With another code, choose what the agent may do here: **Auto** is
 selected by default, or the closest lower mode allowed by your organization’s
 policy. Approving without a code starts at **Read only**:

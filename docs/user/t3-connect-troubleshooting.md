@@ -109,12 +109,12 @@ an active link between your account and the host.
   On the host, open **Settings > Sharing & access** and turn **T3 Connect** on, or
   run `t3 connect`.
 - **The host was linked, but the server did not apply the link yet.** Restart
-  the server on the host: quit and reopen the T3 Code desktop app, run
+  the server on the host: quit and reopen the Tx Code desktop app, run
   `t3 service restart`, or stop `t3 serve` and run it again.
 - **This device's sign-in expired, or the host no longer accepts this
   device.** Sign out of T3 Connect and sign in again.
 - **This device is still loading its T3 Connect sign-in.** Wait a moment;
-  T3 Code retries on its own. If it keeps waiting, reload or restart T3 Code on
+  Tx Code retries on its own. If it keeps waiting, reload or restart Tx Code on
   this device.
 - **Your account reached its tunnel limit.** Remove an environment you do not
   use from your T3 account's T3 Connect page, or

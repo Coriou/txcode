@@ -48,6 +48,47 @@ const GiB = 1024 ** 3;
 export const defaultConcurrency = (cores: number, availableBytes: number) =>
   Math.max(1, Math.min(Math.floor(cores / 2), Math.floor(availableBytes / (6 * GiB))));
 
+// macOS returns E2BIG when one absorb puts every repo path on a single argv.
+export const chunkCommandArgs = (
+  prefix: ReadonlyArray<string>,
+  files: ReadonlyArray<string>,
+  budget = 200_000,
+): Array<Array<string>> => {
+  const batches: Array<Array<string>> = [];
+  let batch: Array<string> = [];
+  const prefixSize = prefix.reduce((sum, arg) => sum + arg.length + 1, 0);
+  let size = prefixSize;
+  for (const file of files) {
+    const next = file.length + 1;
+    if (batch.length > 0 && size + next > budget) {
+      batches.push([...prefix, ...batch]);
+      batch = [];
+      size = prefixSize;
+    }
+    batch.push(file);
+    size += next;
+  }
+  if (batch.length > 0) batches.push([...prefix, ...batch]);
+  return batches;
+};
+
+export const chunkJoined = (
+  parts: ReadonlyArray<string>,
+  separator: string,
+  budget = 100_000,
+): Array<string> => {
+  const groups: Array<Array<string>> = [[]];
+  for (const part of parts) {
+    const current = groups[groups.length - 1] ?? [];
+    if (current.length > 0 && [...current, part].join(separator).length > budget) {
+      groups.push([part]);
+    } else {
+      current.push(part);
+    }
+  }
+  return groups.filter((group) => group.length > 0).map((group) => group.join(separator));
+};
+
 export type Outcome = "pass" | "FAIL" | "TIMEOUT";
 
 export interface Step<R> {
@@ -472,15 +513,32 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
   const filters = (names: ReadonlyArray<string>) => names.flatMap((name) => ["--filter", name]);
   const typecheckWorkers = Math.min(concurrency, affected.length);
   const command = (name: string, args: ReadonlyArray<string>) => ({ name, run: vp(args) });
+  const commandChunked = (
+    name: string,
+    prefix: ReadonlyArray<string>,
+    files: ReadonlyArray<string>,
+  ) => ({
+    name,
+    run: Effect.gen(function* () {
+      const outputs: Array<string> = [];
+      let ok = true;
+      for (const args of chunkCommandArgs(prefix, files)) {
+        const result = yield* vp(args);
+        if (result.output.length > 0) outputs.push(result.output);
+        if (!result.ok) ok = false;
+      }
+      return { ok, output: outputs.join("\n") };
+    }),
+  });
   const compilerFiles = compilerApps.reduce((count, app) => count + app.names.length, 0);
 
   const steps: Array<Step<never>> = [
     ...(runPatchCheck ? [{ name: "unused patches", run: checkPatches }] : []),
     ...(present.length > 0
-      ? [command("format", ["fmt", "--check", "--no-error-on-unmatched-pattern", ...present])]
+      ? [commandChunked("format", ["fmt", "--check", "--no-error-on-unmatched-pattern"], present)]
       : []),
     ...(code.length > 0
-      ? [command("lint", ["lint", "--no-error-on-unmatched-pattern", ...code])]
+      ? [commandChunked("lint", ["lint", "--no-error-on-unmatched-pattern"], code)]
       : []),
     ...(runKnip
       ? knipPasses.map((args, index) => command(`knip ${index + 1}/${knipPasses.length}`, args))
@@ -510,36 +568,43 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
     ...(vitestTests.length > 0
       ? [
           {
-            ...command(`test (${vitestTests.length} files)`, [
-              "test",
-              "run",
-              "--passWithNoTests",
-              ...vitestTests,
-            ]),
+            ...commandChunked(
+              `test (${vitestTests.length} files)`,
+              ["test", "run", "--passWithNoTests"],
+              vitestTests,
+            ),
             serial: true,
           },
         ]
       : []),
     ...(nodeTests.length > 0
       ? [
-          command(`node --test (${nodeTests.length} files)`, [
-            "exec",
-            "node",
-            "--test",
-            ...nodeTests,
-          ]),
+          commandChunked(
+            `node --test (${nodeTests.length} files)`,
+            ["exec", "node", "--test"],
+            nodeTests,
+          ),
         ]
       : []),
     ...(compilerApps.length > 0
       ? [
           {
-            ...command(`react compiler (${compilerFiles} files)`, [
-              "test",
-              "run",
-              ...compilerApps.map((app) => app.test),
-              "-t",
-              compilerApps.flatMap((app) => app.pattern).join("|"),
-            ]),
+            name: `react compiler (${compilerFiles} files)`,
+            run: Effect.gen(function* () {
+              const tests = compilerApps.map((app) => app.test);
+              const patterns = chunkJoined(
+                compilerApps.flatMap((app) => app.pattern),
+                "|",
+              );
+              const outputs: Array<string> = [];
+              let ok = true;
+              for (const pattern of patterns) {
+                const result = yield* vp(["test", "run", ...tests, "-t", pattern]);
+                if (result.output.length > 0) outputs.push(result.output);
+                if (!result.ok) ok = false;
+              }
+              return { ok, output: outputs.join("\n") };
+            }),
             serial: true,
           },
         ]

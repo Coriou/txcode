@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
@@ -34,7 +35,7 @@ const layerTest = Layer.mergeAll(
   Layer.mock(BackgroundPolicy.BackgroundPolicy)({
     shouldRunScopeWork: () => Effect.succeed(false),
   }),
-).pipe(Layer.provideMerge(NodeServices.layer));
+).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const ompDriver = ProviderDriverKind.make("omp");
 

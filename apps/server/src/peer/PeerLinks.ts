@@ -218,7 +218,7 @@ const make = Effect.gen(function* () {
 
   /**
    * The environment answering at `origin`, or nothing when it does not answer
-   * as T3 Code. A certificate this machine rejects fails instead, since
+   * as Tx Code. A certificate this machine rejects fails instead, since
    * the peer may well be there.
    */
   const describe = (origin: string) =>

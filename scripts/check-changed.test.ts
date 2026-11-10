@@ -16,6 +16,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as TestClock from "effect/testing/TestClock";
 
 import {
+  chunkCommandArgs,
+  chunkJoined,
   comparisonBase,
   defaultConcurrency,
   docReaderTests,
@@ -29,6 +31,16 @@ import { decide, readWorkspace } from "../.github/scripts/ci-changes.cjs";
 const GiB = 1024 ** 3;
 
 describe("check:changed", () => {
+  it("splits an absorb-sized argv into spawnable chunks", () => {
+    assert.deepStrictEqual(chunkCommandArgs(["fmt"], ["aa", "bbb", "c"], 8), [
+      ["fmt", "aa"],
+      ["fmt", "bbb"],
+      ["fmt", "c"],
+    ]);
+    assert.deepStrictEqual(chunkCommandArgs(["fmt"], ["a"], 8), [["fmt", "a"]]);
+    assert.deepStrictEqual(chunkJoined(["abcd", "efgh", "ij"], "|", 9), ["abcd|efgh", "ij"]);
+  });
+
   it("bounds the default concurrency by the scarcer of cores and available memory", () => {
     assert.strictEqual(defaultConcurrency(32, 128 * GiB), 16);
     assert.strictEqual(defaultConcurrency(32, 20 * GiB), 3);

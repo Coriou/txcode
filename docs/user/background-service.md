@@ -168,8 +168,8 @@ and turns on automatic shrinking. Settings > Maintenance (web and desktop) or
 Settings > Maintenance (mobile) suggests the repair when at least 1 GiB can be
 reclaimed.
 
-When the desktop app or the background service runs T3 Code on that machine,
-select **Reclaim** in Settings on web or desktop. T3 Code checks for free disk
+When the desktop app or the background service runs Tx Code on that machine,
+select **Reclaim** in Settings on web or desktop. Tx Code checks for free disk
 space, then stops, repairs the database, and starts again. It is offline while
 the repair runs, and running agents stop. If the repair fails, Settings shows
 why.

@@ -18,6 +18,16 @@ import {
 
 const PINNED_MODEL = "openrouter/deepseek/deepseek-v4-flash";
 
+// The generated extension reads this variable itself, so the test sets the real process environment.
+const setRoutingEnv = (dir: string) => {
+  const previous = process.env[OMP_OPENROUTER_ROUTING_ENV];
+  process.env[OMP_OPENROUTER_ROUTING_ENV] = dir;
+  return () => {
+    if (previous === undefined) delete process.env[OMP_OPENROUTER_ROUTING_ENV];
+    else process.env[OMP_OPENROUTER_ROUTING_ENV] = previous;
+  };
+};
+
 describe("OpenRouter upstream setting", () => {
   it("normalizes comma-separated slugs and drops blanks and duplicates", () => {
     expect(openRouterUpstreamsFromSetting(" DeepInfra, cerebras ,, deepinfra, ")).toEqual([
@@ -108,8 +118,7 @@ it.layer(NodeServices.layer)("OpenRouter routing artifacts", (it) => {
 
       const modulePath = path.join(stateDir, "extension-for-test.mjs");
       yield* fs.writeFileString(modulePath, OMP_OPENROUTER_ROUTING_EXTENSION_SOURCE);
-      const previousRoutingDir = process.env[OMP_OPENROUTER_ROUTING_ENV];
-      process.env[OMP_OPENROUTER_ROUTING_ENV] = paths.dir;
+      const restoreRoutingEnv = setRoutingEnv(paths.dir);
       const handlers: Array<(event: { payload: unknown }, ctx: unknown) => unknown> = [];
       try {
         const module: { default: (pi: unknown) => void } = yield* Effect.promise(
@@ -121,8 +130,7 @@ it.layer(NodeServices.layer)("OpenRouter routing artifacts", (it) => {
           },
         });
       } finally {
-        if (previousRoutingDir === undefined) delete process.env[OMP_OPENROUTER_ROUTING_ENV];
-        else process.env[OMP_OPENROUTER_ROUTING_ENV] = previousRoutingDir;
+        restoreRoutingEnv();
       }
       const handler = handlers[0];
       expect(handler).toBeDefined();

@@ -52,7 +52,12 @@ export const environmentReleaseCheckAtom = Atom.family((environmentId: Environme
         }).pipe(
           Effect.timeoutOrElse({
             duration: "20 seconds",
-            orElse: () => Effect.fail(new Error("Checking for updates timed out. Try again.")),
+            orElse: () =>
+              Effect.fail(
+                new EnvironmentUpdateCheckError({
+                  message: "Checking for updates timed out. Try again.",
+                }),
+              ),
           }),
         );
         return {
@@ -66,13 +71,13 @@ export const environmentReleaseCheckAtom = Atom.family((environmentId: Environme
 );
 
 export function releaseCheckValue(
-  result: AsyncResult.AsyncResult<EnvironmentReleaseCheck, Error>,
+  result: AsyncResult.AsyncResult<EnvironmentReleaseCheck, EnvironmentUpdateCheckError>,
 ): EnvironmentReleaseCheck | null {
   return AsyncResult.getOrElse(result, () => null);
 }
 
 export function releaseCheckError(
-  result: AsyncResult.AsyncResult<EnvironmentReleaseCheck, Error>,
+  result: AsyncResult.AsyncResult<EnvironmentReleaseCheck, EnvironmentUpdateCheckError>,
 ): string | null {
   if (!AsyncResult.isFailure(result) || result.waiting) return null;
   return Option.getOrNull(AsyncResult.error(result))?.message ?? null;
