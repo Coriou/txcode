@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { beforeEach, vi } from "vite-plus/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -135,7 +136,9 @@ it.layer(NodeServices.layer)("desktop app update", (it) => {
       ).toContain("installed manually");
     }),
   );
+});
 
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("desktop app update", (it) => {
   it.effect("collapses state reports into progress stages and succeeds on installing", () =>
     Effect.gen(function* () {
       const { service } = yield* makeHarness({

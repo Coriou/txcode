@@ -1,18 +1,6 @@
 import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
 
-/**
- * Prompt links open Tx Code from outside it with a prompt ready to send. They never send it:
- * a link from a stranger fills a draft, and the user reads it and presses Send. A link also
- * cannot pick a runtime mode, branch, or worktree. Those stay the user's own defaults.
- *
- * Shared links are https on the hosted app, because that is what Twitter and GitHub make
- * clickable. The `t3code://` scheme carries the same paths into desktop and mobile:
- *
- *   https://app.t3.codes/new?prompt=…&repo=owner/name&provider=codex&model=gpt-5
- *   https://app.t3.codes/new?pr=owner/name/123&prompt=…
- *   https://app.t3.codes/<environmentId>/<threadId>?prompt=…
- *   t3code://new?…   t3code://threads/<environmentId>/<threadId>?…
- */
+/** Prompt links fill a draft and never send it. They cannot pick a runtime mode, branch, or worktree. */
 
 /** URLs stay well under the limits browsers and link shorteners apply. */
 export const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
@@ -214,7 +202,12 @@ export function promptLinkAppPath(
   }
   if (!URL.canParse(hostedAppUrl) || url.origin !== new URL(hostedAppUrl).origin) return null;
   if (url.pathname === "/new") return `/new${url.search}`;
-  const thread = url.searchParams.has("prompt") ? THREAD_PATH.exec(url.pathname) : null;
+  // The web app's own thread route is a link only with a prompt, so reloading a tab never asks.
+  const thread = url.pathname.startsWith("/threads/")
+    ? THREAD_PATH.exec(url.pathname.slice("/threads".length))
+    : url.searchParams.has("prompt")
+      ? THREAD_PATH.exec(url.pathname)
+      : null;
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
 }
 
