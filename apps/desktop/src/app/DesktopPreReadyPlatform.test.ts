@@ -181,7 +181,7 @@ describe("DesktopPreReadyPlatform", () => {
               DesktopConfig.layerTest({
                 XDG_DATA_HOME: "/xdg",
                 APPIMAGE: "/Applications/current.AppImage",
-                T3CODE_DESKTOP_LAUNCHER_PATH: " /opt/Tx Code/t3code ",
+                T3CODE_DESKTOP_LAUNCHER_PATH: " /opt/T3 Code/t3code ",
               }),
             ),
           ),

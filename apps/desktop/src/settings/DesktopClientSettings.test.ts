@@ -50,7 +50,6 @@ const clientSettings: ClientSettings = {
   fontSmoothing: true,
   glassOpacity: 80,
   onboardingCompletedAt: null,
-  legacySidebarEnabled: false,
   loadBalancingEnabled: false,
   loadBalancingWeights: { "environment-1": 75, "environment-2": 0 },
   notificationFocusRule: "unfocused-or-different-thread",

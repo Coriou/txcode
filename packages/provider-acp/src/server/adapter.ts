@@ -6768,14 +6768,18 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 return { action: "decline" } as const;
               }
               const nativeForm = flavor.extractElicitationForm?.(params);
-              const parsedForm =
+              // Tx fork: a flavor's own form dialect wins over the generic parser.
+              const mappedForm =
                 nativeForm === undefined
+                  ? flavor.mapFormElicitation?.({
+                      message: params.message,
+                      requestedSchema: params.requestedSchema,
+                    })
+                  : undefined;
+              const parsedForm =
+                nativeForm === undefined && mappedForm === undefined
                   ? parseElicitationForm(params.requestedSchema, params.message)
                   : undefined;
-              const mappedForm = flavor.mapFormElicitation?.({
-                message: params.message,
-                requestedSchema: params.requestedSchema,
-              });
               const form =
                 nativeForm ??
                 (parsedForm === undefined

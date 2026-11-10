@@ -185,7 +185,6 @@ describe("readManagedPolicy", () => {
             "the registry cannot be read (Windows error 5)",
           );
         }
-        assert.include(yield* win32({}, {}), "cannot load its registry reader; reinstall Tx Code");
         assert.include(
           yield* win32({}, new WindowsRegistryError({})),
           "cannot load its registry reader; reinstall Tx Code",

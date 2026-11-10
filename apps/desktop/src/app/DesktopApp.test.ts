@@ -38,6 +38,7 @@ import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronNotifications from "../electron/ElectronNotifications.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
@@ -103,6 +104,11 @@ it.effect.each([false, true])(
           Effect.provideService(ElectronDialog.ElectronDialog, {
             showErrorBox: () => Effect.die("unexpected fatal startup error"),
           } as unknown as ElectronDialog.ElectronDialog["Service"]),
+          // Tx fork: notification IPC needs this service; the handlers are mocked out above.
+          Effect.provideService(
+            ElectronNotifications.ElectronNotifications,
+            {} as unknown as ElectronNotifications.ElectronNotifications["Service"],
+          ),
           Effect.provideService(DesktopEnvironment.DesktopEnvironment, {
             platform: "linux",
             isDevelopment: false,
