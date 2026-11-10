@@ -76,7 +76,7 @@ export const ko: Messages = {
   download: {
     title: "macOS, Windows, Linux용 Tx Code 다운로드 | Tx Code",
     description:
-      "macOS, Windows, Linux용 공식 Tx Code 데스크톱 앱을 다운로드하거나 iOS 및 Android 앱을 받으세요. 공식 다운로드 사이트는 t3.codes뿐입니다.",
+      "macOS, Windows, Linux용 공식 T3 Code 데스크톱 앱을 다운로드하거나 iOS 및 Android 앱을 받으세요. 공식 다운로드 사이트는 t3.codes뿐입니다.",
     breadcrumb: "다운로드",
     heading: "Tx Code 다운로드",
     channelLabel: "릴리스 채널",

@@ -43,7 +43,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
       toastManager.update(id, {
         type: "success",
         title: "Thanks for the star!",
-        description: "It really helps Tx Code grow.",
+        description: "It really helps T3 Code, the project Tx Code builds on, grow.",
         timeout: 5_000,
         actionProps: undefined,
         data: {},
@@ -58,7 +58,7 @@ function showStarPrompt(environmentId: EnvironmentId) {
   };
   const id = toastManager.add({
     title: "Enjoying Tx Code?",
-    description: "Give us a star on GitHub to let us know!",
+    description: "Give T3 Code, the project it builds on, a star on GitHub!",
     timeout: 0,
     onClose: dismiss,
     actionProps: { children: "Star on GitHub", onClick: () => void starInPlace() },

@@ -79,7 +79,7 @@ export const de: Messages = {
   download: {
     title: "Tx Code für macOS, Windows und Linux herunterladen | Tx Code",
     description:
-      "Lade die offizielle Desktop-App von Tx Code für macOS, Windows oder Linux herunter, oder hol dir die Apps für iOS und Android. t3.codes ist die einzige offizielle Download-Seite.",
+      "Lade die offizielle Desktop-App von T3 Code für macOS, Windows oder Linux herunter, oder hol dir die Apps für iOS und Android. t3.codes ist die einzige offizielle Download-Seite.",
     breadcrumb: "Download",
     heading: "Tx Code herunterladen",
     channelLabel: "Release-Kanal",

@@ -81,7 +81,7 @@ export const ja: Messages = {
   download: {
     title: "Tx Code をダウンロード（macOS、Windows、Linux）| Tx Code",
     description:
-      "公式の Tx Code デスクトップアプリ（macOS、Windows、Linux）や、iOS・Android アプリをダウンロードできます。公式のダウンロードサイトは t3.codes だけです。",
+      "公式の T3 Code デスクトップアプリ（macOS、Windows、Linux）や、iOS・Android アプリをダウンロードできます。公式のダウンロードサイトは t3.codes だけです。",
     breadcrumb: "ダウンロード",
     heading: "Tx Code をダウンロード",
     channelLabel: "リリースチャンネル",

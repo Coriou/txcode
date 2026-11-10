@@ -76,7 +76,7 @@ export const ru: Messages = {
   download: {
     title: "Скачать Tx Code для macOS, Windows и Linux | Tx Code",
     description:
-      "Скачайте официальное десктопное приложение Tx Code для macOS, Windows или Linux либо приложения для iOS и Android. Единственный официальный сайт для загрузки: t3.codes.",
+      "Скачайте официальное десктопное приложение T3 Code для macOS, Windows или Linux либо приложения для iOS и Android. Единственный официальный сайт для загрузки: t3.codes.",
     breadcrumb: "Скачать",
     heading: "Скачать Tx Code",
     channelLabel: "Канал релизов",

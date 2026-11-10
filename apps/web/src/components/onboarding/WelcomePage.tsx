@@ -927,7 +927,9 @@ function PhoneSection({ environmentId }: { readonly environmentId: EnvironmentId
           <div className="flex items-center gap-8 pt-2 pb-3 pl-8">
             <ol className="min-w-0 flex-1 space-y-5">
               <PhoneStep step={1}>
-                <p className="text-sm text-foreground">Scan with your phone to get the app.</p>
+                <p className="text-sm text-foreground">
+                  Scan with your phone to get the T3 Code app.
+                </p>
               </PhoneStep>
               <PhoneStep step={2}>
                 <PhoneConnectLink environmentId={environmentId} />
@@ -940,7 +942,7 @@ function PhoneSection({ environmentId }: { readonly environmentId: EnvironmentId
                 size={124}
                 level="M"
                 marginSize={2}
-                title="Tx Code app for iPhone and Android"
+                title="T3 Code app for iPhone and Android"
               />
             </div>
           </div>

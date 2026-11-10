@@ -76,7 +76,7 @@ export const en = {
   download: {
     title: "Download Tx Code for macOS, Windows, and Linux | Tx Code",
     description:
-      "Download the official Tx Code desktop app for macOS, Windows, or Linux, or get the iOS and Android apps. t3.codes is the only official download site.",
+      "Download the official T3 Code desktop app for macOS, Windows, or Linux, or get the iOS and Android apps. t3.codes is the only official download site.",
     breadcrumb: "Download",
     heading: "Download Tx Code",
     channelLabel: "Release channel",

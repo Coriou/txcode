@@ -74,7 +74,7 @@ export const zh: Messages = {
   download: {
     title: "下载 Tx Code：macOS、Windows 和 Linux 版 | Tx Code",
     description:
-      "下载 Tx Code 官方桌面应用（macOS、Windows 或 Linux），或获取 iOS 和 Android 应用。t3.codes 是唯一的官方下载网站。",
+      "下载 T3 Code 官方桌面应用（macOS、Windows 或 Linux），或获取 iOS 和 Android 应用。t3.codes 是唯一的官方下载网站。",
     breadcrumb: "下载",
     heading: "下载 Tx Code",
     channelLabel: "发布通道",
