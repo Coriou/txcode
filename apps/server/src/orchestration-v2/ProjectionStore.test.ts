@@ -1,5 +1,7 @@
+import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -36,10 +38,14 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
@@ -65,6 +71,87 @@ declare module "node:sqlite" {
     stat(counter: "vmStep"): number;
   }
 }
+
+// Node 24.19 has no StatementSync.stat (added in Node 26.8). Replay expanded SQL
+// on a sibling runtime that exposes the same counter.
+const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>) =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => "",
+      (left, right) => left + right,
+    ),
+  );
+
+let sqliteStatNode: string | undefined;
+const nodeWithStatementStat = Effect.fn("ProjectionStore.test.nodeWithStatementStat")(function* () {
+  if (sqliteStatNode !== undefined) return sqliteStatNode;
+  const versionsDir = process.execPath.replace(/\/v[^/]+\/installation\/bin\/node$/, "");
+  if (versionsDir === process.execPath) {
+    return yield* Effect.die(new Error("StatementSync.stat is missing on this Node"));
+  }
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const ranked = (yield* fileSystem.readDirectory(versionsDir))
+    .filter((name) => /^v\d+\.\d+\.\d+$/.test(name))
+    .sort((left, right) => {
+      const a = left.slice(1).split(".").map(Number);
+      const b = right.slice(1).split(".").map(Number);
+      return (b[0] ?? 0) - (a[0] ?? 0) || (b[1] ?? 0) - (a[1] ?? 0) || (b[2] ?? 0) - (a[2] ?? 0);
+    });
+  for (const version of ranked) {
+    const executable = path.join(versionsDir, version, "installation", "bin", "node");
+    if (!(yield* fileSystem.exists(executable))) continue;
+    const probe = yield* spawner.exitCode(
+      ChildProcess.make(executable, [
+        "-e",
+        "const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(':memory:'); process.exit(typeof db.prepare('select 1').stat==='function'?0:1)",
+      ]),
+    );
+    if (Number(probe) === 0) {
+      sqliteStatNode = executable;
+      return executable;
+    }
+  }
+  return yield* Effect.die(new Error("StatementSync.stat is missing on this Node"));
+});
+
+const statementVmSteps = Effect.fn("ProjectionStore.test.statementVmSteps")(function* (
+  databasePath: string,
+  statement: NodeSqlite.StatementSync,
+) {
+  if (typeof statement.stat === "function") return statement.stat("vmStep");
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const executable = yield* nodeWithStatementStat();
+  const counted = yield* spawner.spawn(
+    ChildProcess.make(
+      executable,
+      [
+        "-e",
+        "const {DatabaseSync}=require('node:sqlite'); const fs=require('fs'); const db=new DatabaseSync(process.argv[1],{readOnly:true}); const st=db.prepare(fs.readFileSync(0,'utf8')); st.all(); process.stdout.write(String(st.stat('vmStep')))",
+        databasePath,
+      ],
+      { stdin: Stream.encodeText(Stream.make(statement.expandedSQL)) },
+    ),
+  );
+  const [stdout, stderr, status] = yield* Effect.all(
+    [
+      collectStreamAsString(counted.stdout),
+      collectStreamAsString(counted.stderr),
+      counted.exitCode.pipe(Effect.map(Number)),
+    ],
+    { concurrency: "unbounded" },
+  );
+  if (status !== 0) {
+    return yield* Effect.die(new Error(stderr || `sqlite stat runtime exited ${status}`));
+  }
+  const steps = Number(stdout);
+  if (!Number.isFinite(steps)) {
+    return yield* Effect.die(new Error(`sqlite stat runtime returned ${stdout}`));
+  }
+  return steps;
+});
 
 const layerTest = Layer.mergeAll(
   ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
@@ -3617,24 +3704,34 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         );
       // The window read must not grow with history below the newest visible rows. VM steps are
       // deterministic; reading the whole history here cost 65% more steps.
-      const copyPath = "file:/thread-window-steps?vfs=memdb";
-      {
-        using copy = new NodeSqlite.DatabaseSync(copyPath);
-        yield* sql`VACUUM INTO ${copyPath}`;
-        assert.isNotEmpty(windowStatements);
-        const windowSteps = () =>
-          windowStatements.reduce((steps, [query, params]) => {
-            const statement = copy.prepare(query);
-            statement.all(...(params as ReadonlyArray<NodeSqlite.SQLInputValue>));
-            return steps + statement.stat("vmStep");
-          }, 0);
-        const fullSteps = windowSteps();
-        assert.isAbove(fullSteps, 0);
-        copy.exec(
-          "DELETE FROM orchestration_v2_projection_turn_items WHERE ordinal BETWEEN 2 AND 498",
-        );
-        assert.isAtMost(fullSteps, windowSteps() * 1.1);
-      }
+      yield* Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const copyPath = path.join(NodeOS.tmpdir(), `thread-window-steps-${process.pid}.sqlite`);
+        yield* fileSystem.remove(copyPath, { force: true });
+        try {
+          using copy = new NodeSqlite.DatabaseSync(copyPath);
+          yield* sql`VACUUM INTO ${copyPath}`;
+          assert.isNotEmpty(windowStatements);
+          const windowSteps = function* () {
+            let steps = 0;
+            for (const [query, params] of windowStatements) {
+              const statement = copy.prepare(query);
+              statement.all(...(params as ReadonlyArray<NodeSqlite.SQLInputValue>));
+              steps += yield* statementVmSteps(copyPath, statement);
+            }
+            return steps;
+          };
+          const fullSteps = yield* Effect.gen(windowSteps);
+          assert.isAbove(fullSteps, 0);
+          copy.exec(
+            "DELETE FROM orchestration_v2_projection_turn_items WHERE ordinal BETWEEN 2 AND 498",
+          );
+          assert.isAtMost(fullSteps, (yield* Effect.gen(windowSteps)) * 1.1);
+        } finally {
+          yield* fileSystem.remove(copyPath, { force: true });
+        }
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
       assert.deepEqual(
         runlessWindow.projection.turnItems.map((item) => item.ordinal),
         Array.from({ length: THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT }, (_, index) => 499 + index),
