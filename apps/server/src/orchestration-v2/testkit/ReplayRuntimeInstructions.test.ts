@@ -5,7 +5,7 @@ import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeI
 import { materializeReplayTranscriptRuntimeInstructions } from "./ReplayRuntimeInstructions.ts";
 
 const switchedModelRuntimeInfo = [
-  "<runtime_info>In case you're asked: you are running in T3 Code through the Kiro harness, as claude-sonnet-4.5. No need to mention this otherwise. You can embed images, video, and audio in your response using Markdown image syntax with absolute file paths. Link any other file you produce using its absolute path so the user can open it in T3 Code's files viewer.</runtime_info>",
+  "<runtime_info>In case you're asked: you are running in T3 Code through the Kiro harness, as claude-sonnet-4.5. No need to mention this otherwise. You can embed images, video, and audio in your response using Markdown image syntax with absolute file paths. Link every other file you cite or produce by its absolute path, as in [http.ts:42](/abs/path/http.ts:42), so the user can open it in T3 Code's files viewer.</runtime_info>",
   "",
   "<pull_request_linking>",
   "<any>",
